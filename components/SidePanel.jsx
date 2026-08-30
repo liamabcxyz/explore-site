@@ -3,7 +3,6 @@ import { Drawer, Tabs, Tab, Box, IconButton } from "@mui/material";
 import LayersIcon from "@mui/icons-material/Layers";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import LayerTree from "@/components/LayerTree";
-import InspectorPanel from "@/components/inspector_panel/InspectorPanel";
 
 const DRAWER_WIDTH = 340;
 
@@ -142,29 +141,20 @@ export default function SidePanel({
           )}
           {activeTab === "features" && (
             <Box sx={{ p: 1 }}>
-              {features.length > 0 ? (
-                <InspectorPanel
-                  mode={mode}
-                  activeFeature={activeFeature}
-                  setActiveFeature={setActiveFeature}
-                  features={features}
-                  setFeatures={setFeatures}
-                />
-              ) : (
-                <Box
-                  sx={{
-                    p: 2,
-                    textAlign: "center",
-                    color: isDark
-                      ? "rgba(255,255,255,0.5)"
-                      : "rgba(0,0,0,0.4)",
-                    fontFamily: "Montserrat, sans-serif",
-                    fontSize: 13,
-                  }}
-                >
-                  Click a feature on the map to inspect it.
-                </Box>
-              )}
+              {/* TODO(Phase 4): replace with components/analysis/ProfilePanel */}
+              <Box
+                sx={{
+                  p: 2,
+                  textAlign: "center",
+                  color: isDark
+                    ? "rgba(255,255,255,0.5)"
+                    : "rgba(0,0,0,0.4)",
+                  fontFamily: "Montserrat, sans-serif",
+                  fontSize: 13,
+                }}
+              >
+                Analysis coming soon.
+              </Box>
             </Box>
           )}
         </Box>

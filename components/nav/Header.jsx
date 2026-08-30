@@ -3,7 +3,6 @@ import Toolbar from "@mui/material/Toolbar";
 import Box from "@mui/material/Box";
 import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
-import DownloadButton from "@/components/nav/DownloadButton";
 import OvertureWordmark from "@/components/nav/OvertureWordmark";
 import DarkModeToggle from "@/components/nav/DarkModeToggle";
 import LanguageSwitcher from "@/components/nav/LanguageSwitcher";
@@ -12,7 +11,7 @@ import GithubButton from "@/components/nav/GithubButton";
 import SearchBox from "@/components/nav/SearchBox";
 import PropTypes from "prop-types";
 
-export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, language, setLanguage, globeMode, setGlobeMode, activeFeature, onGersSelect }) {
+export default function Header({ zoom, mode, setMode, visibleTypes, language, setLanguage, globeMode, setGlobeMode, activeFeature, onGersSelect }) {
   const isDark = mode === "theme-dark";
 
   return (
@@ -40,7 +39,6 @@ export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, lan
             <span className="material-symbols-outlined" style={{ fontSize: 20 }}>docs</span>
           </IconButton>
         </Tooltip>
-        <DownloadButton zoom={zoom} mode={mode} setZoom={setZoom} visibleTypes={visibleTypes} />
         <ShareButton visibleTypes={visibleTypes} activeFeature={activeFeature} />
         <Tooltip title="Report a bug">
           <IconButton
@@ -83,7 +81,6 @@ Header.propTypes = {
   zoom: PropTypes.number.isRequired,
   mode: PropTypes.string.isRequired,
   setMode: PropTypes.func.isRequired,
-  setZoom: PropTypes.func.isRequired,
   visibleTypes: PropTypes.array.isRequired,
   language: PropTypes.string.isRequired,
   setLanguage: PropTypes.func.isRequired,

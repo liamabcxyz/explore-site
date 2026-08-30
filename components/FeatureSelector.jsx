@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import * as maplibregl from "maplibre-gl";
 import PropTypes from "prop-types";
-import ThemeIcon from "@/components/inspector_panel/ThemeIcon";
+import ThemeIcon from "@/components/ThemeIcon";
 import FeatureTitle from "@/components/FeatureTitle";
 import "@/components/FeatureSelector.css";
 
