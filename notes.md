@@ -293,3 +293,21 @@
 **没做的**：这次只测了 VANTAGE 自己这条链路（query+compute），没有去给 `MapView.jsx` 的 `mousemove` hit-test 或双图同步加时间戳——那需要动 `MapView.jsx` 内部逻辑，跟 `ai_reports/2026-08-30-todo-analysis.md` 里说的"这是目前为止最大的一次例外，应该单独做"是同一个判断，不顺手夹带。
 
 **验证**：`npm test`（19 suite / 655 test，没有新增测试文件——这是调试工具不是算法，FPS/耗时数字本身没有"正确答案"可断言）、`npm run lint`（没有新增 warning）、`npm run build` 通过，并且专门确认了 `PerfOverlay` 没有进生产 bundle。
+
+---
+
+## 13. 卡顿真修——建筑裁剪 + 接上 Worker
+
+用户看完 PerfOverlay 数字之后确认：卡是因为 `computeViewshed` 在主线程同步跑，把浏览器整个卡死，而不只是算得慢。核对之后拍板：两件事一起做——建筑范围裁剪（减少总运算量）+ 挪进 Worker（运算量不变，但不再挡主线程）。这是 `todo.md`"地图页卡顿"一节里 `ai_reports/2026-08-30-todo-analysis.md` 评价"性价比最高"的那一项。
+
+**新增 `lib/geo/buildingsNearPoint.js`**：`filterBuildingsNearPoint(buildings, point, radiusMeters)`。原理很直接——`computeViewshed` 测的每一条视线，一端是分析半径内的观察点、另一端是发射点本身，所以半径以外的建筑物理上不可能出现在任何一条视线上，可以在喂给遮挡算法之前就整个丢掉。按顶点距离过滤（不是精确的"点到多边形边"距离），因为建筑轮廓（几米到几十米）相对分析半径（几百米）小到可以忽略，加了 50m 安全边距兜住这点误差。之前 `querySourceFeatures` 拿到的是当前视口/已加载瓦片里的**全部**建筑（可能几百到几千栋），现在裁到半径内，运算量是真的变小，不是换个地方跑。同一个过滤函数在网格计算和剖面点击两处都用了。
+
+**接上 `lib/viewshed/worker.js`**：这个文件从 Phase 6（`notes.md` 更早那一节）写好之后就没人 import 过。这次真正用起来了：`LaunchPointControl.jsx` 里 `new Worker(new URL("../../lib/viewshed/worker.js", import.meta.url))`，用的是 webpack 5 内置的 worker 打包支持（不是把 `lib/viewshed/worker.js` 当静态文件塞进 `public/`——那是 MapLibre 自己预编译好的 worker 才用的模式，见 `scripts/copy-maplibre-assets.mjs`；`worker.js` 用了 `@/lib/viewshed/computeViewshed` 这种别名 import，得走 webpack 编译，两种模式不能混用）。Worker 实例在组件挂载时建一次、卸载时 `terminate()`，不是每次请求建一个。
+
+**并发正确性**：`computeViewshed` 本身没变快，如果用户快速拖口径滑杆，会连续 `postMessage` 好几次，Worker 是单线程顺序处理，响应可能乱序"追上"——如果直接用一个共享的 `worker.onmessage` 覆盖式赋值，旧请求的迟到响应可能被新请求的 handler 误当成自己的结果处理，把地图上的新数据换回旧的。这里用 `requestIdRef`（每次请求自增）+ 给每次 `postMessage` 各自挂一个 `{once:true}` 的独立监听器，每个监听器的闭包记着自己发出时的 `requestId`，响应回来时跟当时最新的 `requestIdRef.current` 比对，对不上就丢弃——不去尝试真正取消 Worker 里已经在算的那次请求（Worker 原生不支持取消一条正在处理的消息），只是保证界面不会被过期结果覆盖，Worker 会白算几次但界面永远显示最新请求的结果。
+
+**验证结果不是靠猜的**：`next build` 产物里专门 grep 确认了 `lib/viewshed/worker.js` 被打包成了一个独立、极小（2.3KB 未压缩）的 chunk（`439.d486cdbaba05318f.js`），内容只有 `fractionVisible`/`elevationAngleDeg`/`apparentAngularDiameterDeg`/`angularSizeGate`/`elevationScore` 加一个 `self.onmessage=...`——不含任何 React/MUI 代码；主 chunk 里 `new Worker(...)` 那行编译成 `new Worker(r.tu(new URL(r.p+r.u(439),r.b)))`，`r.p` 是 webpack 的 publicPath（带 `basePath`），确认部署到子路径也不会指错。
+
+**测试**：新增 `__tests__/buildingsNearPoint.test.js`，6 个用例（半径内保留、半径+边距外丢弃、卡在边距带内保留、刚过边距丢弃、轮廓跨边界只要有一个顶点在范围内就保留、混合列表正确过滤）。`npm test`：20 suite / 661 test 全过。`npm run lint`：跟之前一样只有一条已知能接受的 `set-state-in-effect` warning，没有新增问题。`npm run build` 通过。
+
+**没做的**：Worker 里现在还是每次收到消息都重新跑一遍完整 `computeViewshed`——没有做"如果建筑没变，复用上一次结果"之类的缓存，也没有真正取消掉过期请求在 Worker 里的计算（只是丢弃它的结果）。`todo.md`"地图页卡顿"一节剩下两条（拦住误选、去掉 mousemove hit-test）都要动 `MapView.jsx` 核心逻辑，这次没有顺手做。

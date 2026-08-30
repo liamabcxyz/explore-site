@@ -54,9 +54,7 @@ Koschmieder 公式(文档 §5):`W = exp(-3.912·s̄/V)`,s̄ 为代表性斜距,V
 
 分步（先交互误伤，再计算）：
 
-- **P0 拦住误选**：放发射点 / 选观察点时不要走 MapView 的要素选取；大面积 `land` / `water` / `land_cover` 退出可点高亮。点地图不再整城飘红、侧栏乱弹。
-- **P0 去掉全图层 mousemove hit-test**：拖地图会立刻顺很多。VANTAGE 不需要"悬停任何要素都变手型"。
-- **P1 裁建筑 + Worker**：只拿 1.5km 内的楼做遮挡，计算丢进已有的 `worker.js`。点发射点不再冻住主线程。
-- **P2 拆掉 Explore/Inspect 双图**：v0.2 本来就要删对比滑条，现在还在付双倍 GPU/瓦片。动 `MapView.jsx` 最深，单独做。
-
-（用户要求先记成一类，不写代码。）
+- **P0 拦住误选**：放发射点 / 选观察点时不要走 MapView 的要素选取；大面积 `land` / `water` / `land_cover` 退出可点高亮。点地图不再整城飘红、侧栏乱弹。（还没做——这条要动 `MapView.jsx` 既有点击处理器本身，跟其它 VANTAGE 改动"只加独立 effect、不碰核心逻辑"的原则不一样，值得单独做单独测，见 `ai_reports/2026-08-30-todo-analysis.md`。）
+- **P0 去掉全图层 mousemove hit-test**：拖地图会立刻顺很多。VANTAGE 不需要"悬停任何要素都变手型"。（还没做，同样要动 `MapView.jsx`。）
+- **P1 裁建筑 + Worker —— 已完成**：建筑查询裁到分析半径内（`lib/geo/buildingsNearPoint.js`），`computeViewshed` 挪进 `lib/viewshed/worker.js` 跑（原来写好但没接的那个）。点发射点不再冻住主线程。实现见 `notes.md`。
+- **P2 拆掉 Explore/Inspect 双图**：v0.2 本来就要删对比滑条，现在还在付双倍 GPU/瓦片。动 `MapView.jsx` 最深，单独做。（还没做。）

@@ -7,20 +7,20 @@ import { useMapInstance } from "@/lib/MapContext";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
+import { filterBuildingsNearPoint } from "@/lib/geo/buildingsNearPoint";
 import { findRooftopBase } from "@/lib/geo/rooftopBase";
 import { reportViewshedPerf } from "@/lib/perf";
-import { computeViewshed } from "@/lib/viewshed/computeViewshed";
 import { computeSightlineProfile } from "@/lib/viewshed/computeProfile";
 import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
 
-// Was 1500m (covers the full comfortable viewing ring even for a 12" shell)
-// but that's ~2200 cells/click and placing a launch point was laggy — see
-// the PerfOverlay numbers and todo.md's "地图页卡顿" section for the fuller
-// diagnosis (querySourceFeatures isn't clipped to this radius, mousemove
-// hit-tests every interactive layer, etc. — none of that is fixed by this).
-// 500m is a stopgap that cuts cell count roughly 3x while those are
-// addressed; it won't show the full sweet-spot ring for larger calibers.
-const ANALYSIS_RADIUS = 500;
+// 1500m covers the full comfortable viewing ring even for a 12" shell.
+// Was dropped to 500m as a stopgap while placing a launch point froze the
+// main thread; now that computeViewshed runs in a Worker (lib/viewshed/worker.js)
+// and querySourceFeatures results are clipped to this radius before scoring
+// (lib/geo/buildingsNearPoint.js), raising it back doesn't reintroduce that —
+// it does mean more cells (37 rings x 60 sectors ≈ 2220) for the Worker to
+// churn through per request, worth checking against PerfOverlay's numbers.
+const ANALYSIS_RADIUS = 1500;
 const RADIAL_SPACING = 40; // meters between rings
 const ANGULAR_SPACING = 6; // degrees between sectors — 60 sectors per ring
 const SOURCE_ID = "vantage-viewshed";
@@ -48,10 +48,27 @@ export default function LaunchPointControl() {
   const markerRef = useRef(null);
   const observerMarkerRef = useRef(null);
   const placingRef = useRef(placing);
+  const workerRef = useRef(null);
+  // Bumped on every grid request so a response that arrives after a newer
+  // request was already sent (rapid caliber drags, mainly) gets ignored
+  // instead of overwriting the map with stale data — see the grid effect
+  // below for how this is used.
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     placingRef.current = placing;
   }, [placing]);
+
+  // The actual O(cells x buildings) viewshed math now runs off the main
+  // thread (lib/viewshed/worker.js is the same computeViewshed() the grid
+  // effect used to call directly) so placing/moving a launch point doesn't
+  // freeze the map while it's computing. One worker for the component's
+  // lifetime, not one per request.
+  useEffect(() => {
+    const worker = new Worker(new URL("../../lib/viewshed/worker.js", import.meta.url));
+    workerRef.current = worker;
+    return () => worker.terminate();
+  }, []);
 
   // Register the viewshed source/layer once the style is ready.
   useEffect(() => {
@@ -175,19 +192,42 @@ export default function LaunchPointControl() {
       return;
     }
 
+    const worker = workerRef.current;
+    if (!worker) return;
+
     const queryStart = performance.now();
     const buildingFeats = map.querySourceFeatures("buildings", { sourceLayer: "building" });
     const partFeats = map.querySourceFeatures("buildings", { sourceLayer: "building_part" });
-    const buildings = buildingsFromMapFeatures(buildingFeats, partFeats);
+    const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
+    // Nothing farther than the analysis radius from the launch point can
+    // ever sit on a sightline the grid tests — cutting them here shrinks the
+    // O(cells x buildings) cost itself, not just where it runs. Without this
+    // `buildings` was everything querySourceFeatures happened to have
+    // loaded for the current viewport, often thousands of buildings the
+    // occlusion math never needed to look at.
+    const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
     const queryMs = performance.now() - queryStart;
 
     // Computed fresh here (not read from the `rooftopBase` state var) so the
-    // grid below always uses the value that matches the buildings just
+    // request below always uses the value that matches the buildings just
     // queried — the state update is for display purposes (the caption below)
     // and only takes effect on the next render.
-    const computeStart = performance.now();
     const rooftop = findRooftopBase(launch, buildings);
-    const result = computeViewshed({
+    setRooftopBase(rooftop);
+
+    const requestId = ++requestIdRef.current;
+    const computeStart = performance.now();
+    worker.addEventListener(
+      "message",
+      (e) => {
+        if (requestId !== requestIdRef.current) return; // superseded by a newer request
+        const computeMs = performance.now() - computeStart;
+        map.getSource(SOURCE_ID).setData(e.data);
+        reportViewshedPerf({ queryMs, computeMs, buildingCount: buildings.length, cellCount: e.data.features.length });
+      },
+      { once: true }
+    );
+    worker.postMessage({
       launch,
       targetHeight: caliberHeight + rooftop,
       shellRadius,
@@ -196,11 +236,6 @@ export default function LaunchPointControl() {
       angularSpacing: ANGULAR_SPACING,
       buildings,
     });
-    const computeMs = performance.now() - computeStart;
-
-    setRooftopBase(rooftop);
-    map.getSource(SOURCE_ID).setData(result);
-    reportViewshedPerf({ queryMs, computeMs, buildingCount: buildings.length, cellCount: result.features.length });
   }, [map, launch, caliberHeight, shellRadius]);
 
   // Full sightline breakdown for whichever point the user picked, published
@@ -221,7 +256,8 @@ export default function LaunchPointControl() {
 
     const buildingFeats = map.querySourceFeatures("buildings", { sourceLayer: "building" });
     const partFeats = map.querySourceFeatures("buildings", { sourceLayer: "building_part" });
-    const buildings = buildingsFromMapFeatures(buildingFeats, partFeats);
+    const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
+    const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
 
     const profile = computeSightlineProfile({
       observer,
