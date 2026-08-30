@@ -25,7 +25,7 @@ export default function Header({ zoom, mode, setMode, visibleTypes, language, se
       }}
     >
       <Toolbar variant="dense" sx={{ minHeight: 60 }}>
-        <OvertureWordmark />
+        <OvertureWordmark href="/" />
         <Box sx={{ flexGrow: 1 }} />
         <GithubButton mode={mode} />
         <Tooltip title="Documentation">

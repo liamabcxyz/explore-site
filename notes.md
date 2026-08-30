@@ -239,3 +239,15 @@
 **`components/analysis/ProfilePanel.jsx`**：原来"Overall viewing quality"那一行的颜色/文字是拿 `verdictColor(profile.score)`/`verdictLabel(profile.score)` 复用第一版验证结果那一行的三档阈值函数算的——这次单独建了 `CATEGORY_COLOR`/`CATEGORY_LABEL` 两张表，跟地图配色完全对应（"Bad angle"对应紫色），不再共用那两个只认三档红黄绿的旧函数。
 
 **验证**：真机截图，旧金山金融区实测——发射点周围出现一圈干净的**紫色**环，和外围真正被高楼挡住的**红色**区域清楚分开；`querySourceFeatures` 统计出四个分类都有真实数据命中（`poor-angle` 415、`blocked` 1273、`good` 94、`partial` 8）。`npm test`：16 suite / 642 test 全过（新增 8 个用例：`comfortFactor`/`visibilityCategory` 的单测，加上已有测试文件里补的 `category` 断言），`npm run build` 通过。
+
+---
+
+## 9. 城市搜索落地页 —— `/` 不再直接进地球
+
+产品判断：VANTAGE 是街区尺度的分析工具，一打开对着全球地球既慢又不知道该干什么。首页改成搜城市，选中后再进原来的地图页，并且已经定位到那座城。
+
+**路由**：原来的 `app/page.jsx` 整页搬到 `app/map/page.jsx`（地图、发射点、剖面图一条都没改）。新的 `/` 只渲染 `CitySearch`，不加载 MapLibre。分享链接（`/map#zoom/lat/lng`、`?layers=`、`?feature=`）仍然指向地图页，hash 读取逻辑原样跟着搬家。顶栏 logo 改成链回 `/`，方便换一座城。
+
+**定位**：复用 header 搜索同一套 geocoder（`geocoder.bradr.dev`）。`lib/geocoder.js` 把结果转成 `/map#zoom/lat/lng`——建筑挤出图层 `minzoom` 是 14，所以城市视野夹在 14–14.5，避免落到看不到楼的尺度。提交搜索（按钮或回车）走第一条结果；下拉可以点具体条目；下面五个建议芯片（旧金山等）不经过 geocoder，直接跳。
+
+**没做的**：没有把 header 里那套 locality/country/GERS 搜索搬到落地页——落地页只搜城。地图页 header 的 SearchBox 原样保留，进城之后还能精细定位。
