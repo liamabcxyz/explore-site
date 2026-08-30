@@ -259,3 +259,37 @@
 用户反馈辐射圈太小。两层原因叠在一起：搜城落地在 z14.5 时 300m 在屏幕上只有约 50px；物理上 12 英寸弹的 15° 仰角甜蜜区要到约 1.3km 才结束，300m 连 3 英寸的"太远"紫环都画不全。
 
 `LaunchPointControl.jsx` 的 `ANALYSIS_RADIUS` 300 → **1500**，剖面点击的距离钳制跟它共用同一个常量所以一起变大。环间距 20m → **40m**，格子数 15×60=900 变成 37×60≈2220，跟最早笛卡尔网格"约 2150 点"同一量级，不把主线程计算再翻三倍。算法函数签名没变，单测都是自己传入 `analysisRadius` 的，不用改。
+
+---
+
+## 11. P1-3 —— 发射点在楼顶时起算高度加上楼高
+
+用户带着 `todo.md`（新建于上面几节期间）来对齐优先级，先让写了一份分析报告（存在 `ai_reports/2026-08-30-todo-analysis.md`），确认 P1-3 是清单里最小、最干净、纯粹是 bug 不是新功能的一项，随后单独拎出来做。
+
+**问题**：`targetHeight`（烟花球高度）一直是从 z=0 绝对地面往上算 `caliber.js` 导出的相对高度。如果用户把发射点点在一栋楼的楼顶（有组织的秀常见做法），真实燃放高度应该是"这栋楼的高度 + 口径导出的相对高度"，现在的算法把整栋楼的高度白白漏掉了。
+
+**新增 `lib/geo/rooftopBase.js`**：`findRooftopBase(point, buildings)`，标准射线法（even-odd rule）点在多边形内判断，只查外环（跟 `lib/viewshed/sightline.js` 的遮挡判断一样不管天井洞）。`point`/`buildings.footprint` 都还是原始经纬度（没投影成局部米制平面）——这一步只是拓扑包含判断，不是量距离，直接在经纬度平面上做跟投影到米制平面结果一样，没必要多一次投影。多栋楼的轮廓重叠（比如裙楼上面立一座塔楼，点刚好落在两者都覆盖的范围）时取**最高**的那栋——你实际站的是塔楼楼顶，不是裙楼楼顶。`normalizeBuilding()` 的 `height` 字段本来就是从地面算起的绝对楼高（不是要再加 `base`），直接拿来用。
+
+**接入 `LaunchPointControl.jsx`**：`deriveShellParams(caliber)` 解构出来的原始值改名 `caliberHeight`（保持这个函数本身纯粹"口径→相对高度"，不掺楼顶逻辑），新增 `rooftopBase` state，`targetHeight = caliberHeight + rooftopBase`。计算网格的那个 effect 里，本来就在查 `buildings`（算遮挡用），顺手用同一批数据算一次 `findRooftopBase`——不需要新的查询。**这里有一个容易踩的坑**：`rooftopBase` 是 state，effect 里 `setRooftopBase(rooftop)` 之后要等下一次渲染才生效，如果这次 `computeViewshed` 还接着读外层的 `targetHeight`（还是上一轮的值），算出来的网格会滞后一拍——所以网格计算这里没有读 state 派生的 `targetHeight`，而是本次查询算出的本地变量 `caliberHeight + rooftop` 直接传给 `computeViewshed`，`rooftopBase` state 只用于展示（面板文字）。**顺带修了一个因为这次改动会暴露出来的依赖数组问题**：网格 effect 和剖面 effect 原来依赖数组里写的是 `caliber`（当时 `targetHeight` 是 `caliber` 的纯函数，用 `caliber` 当代理没问题），现在 `targetHeight` 还依赖 `rooftopBase`，继续用 `caliber` 当代理会让 rooftop 变化时两个 effect 都不重新跑——改成直接依赖 `targetHeight`/`shellRadius` 本身。
+
+**UI**：发射点面板那行文字，`rooftopBase > 0` 时多显示一段 `(incl. Nm rooftop)`，让用户能看到楼顶高度确实被算进去了。
+
+**测试**：新增 `__tests__/rooftopBase.test.js`，5 个用例（点不在任何楼里→0、没有楼→0、点在楼里→返回楼高、两栋楼轮廓重叠取更高的那栋且跟输入顺序无关、点刚好在轮廓外一点点→0）。`npm test`：19 suite / 655 test 全过。`npm run lint`：只有一条已知能接受的 `react-hooks/set-state-in-effect` warning（跟仓库里已经存在的同类写法一个性质，不是新的问题类别）。`npm run build` 通过（`Worker is not defined`/`ECONNRESET` 仍是记录过的良性噪音）。
+
+---
+
+## 12. 调试用的实时性能 HUD
+
+用户反馈放置发射点很卡，想知道原因，让在页面左上角加一个实时性能数据。这不是产品功能，是给 `todo.md`"地图页卡顿"那一节诊断用的临时工具。
+
+**新增 `lib/perf.js`**：`reportViewshedPerf(detail)`/`onViewshedPerf(callback)` 一对函数，底层就是一个 `window` `CustomEvent`——选这个而不是走已有的 `LaunchContext`，是因为这纯粹是调试数据，跟 `ProfilePanel` 消费的分析结果不是一回事，不该混进同一条数据通道；用事件而不是新开一个 Context，是因为生产者（`LaunchPointControl.jsx`）和消费者（新的 `PerfOverlay.jsx`）不需要共享状态，只是单向广播一次性数据。
+
+**新增 `components/launch/PerfOverlay.jsx`**：左上角悬浮面板，两块数据——
+- **FPS**：自己起一个 `requestAnimationFrame` 循环，每 ~500ms 采样一次，跟 `LaunchPointControl` 上报的数字完全独立。这是故意的：FPS 掉了但下面 viewshed 耗时很小，说明卡顿另有原因（`todo.md` 里点名的 `mousemove` 全图层 hit-test、双 MapLibre 实例同步——这两个都在 `MapView.jsx` 里，这次没有为了测它们去碰那个文件），FPS 和 viewshed 耗时一起降，才指向 viewshed 计算本身。
+- **viewshed 耗时**：`LaunchPointControl.jsx` 的网格计算 effect 里用 `performance.now()` 包了两段——`querySourceFeatures`+`buildingsFromMapFeatures`（"query"）和 `findRooftopBase`+`computeViewshed`（"compute"，含上一节新加的楼顶判断），连同建筑数/格子数一起上报。
+
+**只在开发环境挂载**：`app/map/page.jsx` 里 `{process.env.NODE_ENV !== "production" && <PerfOverlay />}`。验证过 `npm run build` 产物里 `PerfOverlay.jsx` 自己的 JSX（比如"place a launch point to see viewshed timing"这行文案）确实没进最终 bundle，`next build` 会把 `NODE_ENV` 内联成字面量、走标准 tree-shaking 拿掉整个死分支——`lib/perf.js` 的 `reportViewshedPerf` 调用本身没做同样的开发环境判断，仍然留在生产包里，但这是有意的：不带监听者广播一个 `CustomEvent` 开销可以忽略，不值得为了省这几行代码再套一层判断。
+
+**没做的**：这次只测了 VANTAGE 自己这条链路（query+compute），没有去给 `MapView.jsx` 的 `mousemove` hit-test 或双图同步加时间戳——那需要动 `MapView.jsx` 内部逻辑，跟 `ai_reports/2026-08-30-todo-analysis.md` 里说的"这是目前为止最大的一次例外，应该单独做"是同一个判断，不顺手夹带。
+
+**验证**：`npm test`（19 suite / 655 test，没有新增测试文件——这是调试工具不是算法，FPS/耗时数字本身没有"正确答案"可断言）、`npm run lint`（没有新增 warning）、`npm run build` 通过，并且专门确认了 `PerfOverlay` 没有进生产 bundle。

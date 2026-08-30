@@ -6,6 +6,7 @@ import Map from "@/components/MapView";
 import MapContext from "@/lib/MapContext";
 import LaunchPointControl from "@/components/launch/LaunchPointControl";
 import LaunchProvider from "@/components/launch/LaunchProvider";
+import PerfOverlay from "@/components/launch/PerfOverlay";
 import TermsOfUse from "@/components/nav/TermsOfUse";
 import { keepTheme, darkTheme, lightTheme } from "@/lib/themeUtils";
 import { useState, useEffect, useRef } from "react";
@@ -181,6 +182,7 @@ export default function MapPage() {
             <LaunchPointControl />
           </LaunchProvider>
         </MapContext.Provider>
+        {process.env.NODE_ENV !== "production" && <PerfOverlay />}
         <TermsOfUse />
       </ThemeProvider>
     </div>

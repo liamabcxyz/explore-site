@@ -7,19 +7,20 @@ import { useMapInstance } from "@/lib/MapContext";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
+import { findRooftopBase } from "@/lib/geo/rooftopBase";
+import { reportViewshedPerf } from "@/lib/perf";
 import { computeViewshed } from "@/lib/viewshed/computeViewshed";
 import { computeSightlineProfile } from "@/lib/viewshed/computeProfile";
 import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
 
-// 300m was a first-pass "city block" disk — too small both on the map
-// (at the z14–14.5 city landing it's ~50px across) and physically: a 12"
-// shell's 15° elevation sweet-spot sits out around 1.3km, and even a 3"
-// shell's "too far" purple ring only starts ~330m out. 1500m covers the
-// comfortable viewing ring for every standard caliber. Ring spacing steps
-// up from 20m so the cell count stays near the original ~900–2000 budget
-// (37 rings × 60 sectors ≈ 2220) rather than 3.3×-ing compute on the
-// main thread.
-const ANALYSIS_RADIUS = 1500;
+// Was 1500m (covers the full comfortable viewing ring even for a 12" shell)
+// but that's ~2200 cells/click and placing a launch point was laggy — see
+// the PerfOverlay numbers and todo.md's "地图页卡顿" section for the fuller
+// diagnosis (querySourceFeatures isn't clipped to this radius, mousemove
+// hit-tests every interactive layer, etc. — none of that is fixed by this).
+// 500m is a stopgap that cuts cell count roughly 3x while those are
+// addressed; it won't show the full sweet-spot ring for larger calibers.
+const ANALYSIS_RADIUS = 500;
 const RADIAL_SPACING = 40; // meters between rings
 const ANGULAR_SPACING = 6; // degrees between sectors — 60 sectors per ring
 const SOURCE_ID = "vantage-viewshed";
@@ -35,7 +36,14 @@ export default function LaunchPointControl() {
   // set height/radius independently is exactly the physically-inconsistent-
   // combination bug this replaces.
   const [caliber, setCaliber] = useState(3);
-  const { targetHeight, shellRadius } = deriveShellParams(caliber);
+  const { targetHeight: caliberHeight, shellRadius } = deriveShellParams(caliber);
+  // A launch point placed on a rooftop/terrace burns from that roof's height,
+  // not from z=0 ground — deriveShellParams stays a pure "caliber -> height
+  // above the pad" function; this is a separate additive term computed
+  // whenever the launch point (or the buildings under it) changes. See
+  // lib/geo/rooftopBase.js and todo.md P1-3.
+  const [rooftopBase, setRooftopBase] = useState(0);
+  const targetHeight = caliberHeight + rooftopBase;
   const [observer, setObserver] = useState(null);
   const markerRef = useRef(null);
   const observerMarkerRef = useRef(null);
@@ -163,25 +171,37 @@ export default function LaunchPointControl() {
 
     if (!launch) {
       map.getSource(SOURCE_ID).setData({ type: "FeatureCollection", features: [] });
+      setRooftopBase(0);
       return;
     }
 
+    const queryStart = performance.now();
     const buildingFeats = map.querySourceFeatures("buildings", { sourceLayer: "building" });
     const partFeats = map.querySourceFeatures("buildings", { sourceLayer: "building_part" });
     const buildings = buildingsFromMapFeatures(buildingFeats, partFeats);
+    const queryMs = performance.now() - queryStart;
 
+    // Computed fresh here (not read from the `rooftopBase` state var) so the
+    // grid below always uses the value that matches the buildings just
+    // queried — the state update is for display purposes (the caption below)
+    // and only takes effect on the next render.
+    const computeStart = performance.now();
+    const rooftop = findRooftopBase(launch, buildings);
     const result = computeViewshed({
       launch,
-      targetHeight,
+      targetHeight: caliberHeight + rooftop,
       shellRadius,
       analysisRadius: ANALYSIS_RADIUS,
       radialSpacing: RADIAL_SPACING,
       angularSpacing: ANGULAR_SPACING,
       buildings,
     });
+    const computeMs = performance.now() - computeStart;
 
+    setRooftopBase(rooftop);
     map.getSource(SOURCE_ID).setData(result);
-  }, [map, launch, caliber]);
+    reportViewshedPerf({ queryMs, computeMs, buildingCount: buildings.length, cellCount: result.features.length });
+  }, [map, launch, caliberHeight, shellRadius]);
 
   // Full sightline breakdown for whichever point the user picked, published
   // to LaunchContext so ProfilePanel (mounted elsewhere, inside SidePanel)
@@ -212,7 +232,7 @@ export default function LaunchPointControl() {
     });
 
     setAnalysis({ launch, targetHeight, shellRadius, caliber, observer, profile });
-  }, [map, launch, observer, caliber, setAnalysis]);
+  }, [map, launch, observer, targetHeight, shellRadius, caliber, setAnalysis]);
 
   return (
     <Paper
@@ -234,7 +254,9 @@ export default function LaunchPointControl() {
         {launch && (
           <>
             <Typography variant="caption">
-              Caliber: {caliber}&quot; · burst ~{Math.round(targetHeight)}m · shell ~{Math.round(shellRadius)}m · {ANALYSIS_RADIUS / 1000} km radius
+              Caliber: {caliber}&quot; · burst ~{Math.round(targetHeight)}m
+              {rooftopBase > 0 && ` (incl. ${Math.round(rooftopBase)}m rooftop)`}
+              {" "}· shell ~{Math.round(shellRadius)}m · {ANALYSIS_RADIUS / 1000} km radius
             </Typography>
             <Slider
               min={3}
