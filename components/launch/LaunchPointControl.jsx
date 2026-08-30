@@ -11,8 +11,16 @@ import { computeViewshed } from "@/lib/viewshed/computeViewshed";
 import { computeSightlineProfile } from "@/lib/viewshed/computeProfile";
 import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
 
-const ANALYSIS_RADIUS = 300;
-const RADIAL_SPACING = 20; // meters between rings
+// 300m was a first-pass "city block" disk — too small both on the map
+// (at the z14–14.5 city landing it's ~50px across) and physically: a 12"
+// shell's 15° elevation sweet-spot sits out around 1.3km, and even a 3"
+// shell's "too far" purple ring only starts ~330m out. 1500m covers the
+// comfortable viewing ring for every standard caliber. Ring spacing steps
+// up from 20m so the cell count stays near the original ~900–2000 budget
+// (37 rings × 60 sectors ≈ 2220) rather than 3.3×-ing compute on the
+// main thread.
+const ANALYSIS_RADIUS = 1500;
+const RADIAL_SPACING = 40; // meters between rings
 const ANGULAR_SPACING = 6; // degrees between sectors — 60 sectors per ring
 const SOURCE_ID = "vantage-viewshed";
 const LAYER_ID = "vantage-viewshed-sectors";
@@ -226,7 +234,7 @@ export default function LaunchPointControl() {
         {launch && (
           <>
             <Typography variant="caption">
-              Caliber: {caliber}&quot; · burst height ~{Math.round(targetHeight)}m · shell radius ~{Math.round(shellRadius)}m
+              Caliber: {caliber}&quot; · burst ~{Math.round(targetHeight)}m · shell ~{Math.round(shellRadius)}m · {ANALYSIS_RADIUS / 1000} km radius
             </Typography>
             <Slider
               min={3}
