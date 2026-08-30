@@ -3,6 +3,7 @@ import { Drawer, Tabs, Tab, Box, IconButton } from "@mui/material";
 import LayersIcon from "@mui/icons-material/Layers";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import LayerTree from "@/components/LayerTree";
+import ProfilePanel from "@/components/analysis/ProfilePanel";
 
 const DRAWER_WIDTH = 340;
 
@@ -139,24 +140,7 @@ export default function SidePanel({
               zoom={zoom}
             />
           )}
-          {activeTab === "features" && (
-            <Box sx={{ p: 1 }}>
-              {/* TODO(Phase 4): replace with components/analysis/ProfilePanel */}
-              <Box
-                sx={{
-                  p: 2,
-                  textAlign: "center",
-                  color: isDark
-                    ? "rgba(255,255,255,0.5)"
-                    : "rgba(0,0,0,0.4)",
-                  fontFamily: "Montserrat, sans-serif",
-                  fontSize: 13,
-                }}
-              >
-                Analysis coming soon.
-              </Box>
-            </Box>
-          )}
+          {activeTab === "features" && <ProfilePanel isDark={isDark} />}
         </Box>
       </Drawer>
     </>

@@ -5,6 +5,7 @@ import Header from "@/components/nav/Header";
 import Map from "@/components/MapView";
 import MapContext from "@/lib/MapContext";
 import LaunchPointControl from "@/components/launch/LaunchPointControl";
+import LaunchProvider from "@/components/launch/LaunchProvider";
 import TermsOfUse from "@/components/nav/TermsOfUse";
 import { keepTheme, darkTheme, lightTheme } from "@/lib/themeUtils";
 import { useState, useEffect, useRef } from "react";
@@ -139,44 +140,46 @@ export default function Home() {
     <div>
       <ThemeProvider theme={modeName === "theme-dark" ? darkTheme : lightTheme}>
         <MapContext.Provider value={mapInstance}>
-          <Header
-            mode={modeName}
-            setMode={setModeName}
-            zoom={zoom}
-            visibleTypes={visibleTypes}
-            language={language}
-            setLanguage={setLanguage}
-            globeMode={globeMode}
-            setGlobeMode={setGlobeMode}
-            activeFeature={activeFeature}
-            onGersSelect={({ gersId }) => {
-              setPendingFeature({ gersId, searchAll: true });
-            }}
-          />
-          <Map
-            mode={modeName}
-            language={language}
-            features={features}
-            setFeatures={setFeatures}
-            zoom={zoom}
-            setZoom={setZoom}
-            setActiveFeature={setActiveFeature}
-            activeFeature={activeFeature}
-            visibleTypes={visibleTypes}
-            setVisibleTypes={setVisibleTypes}
-            defaultVisibleTypes={DEFAULT_VISIBLE}
-            inspectVisibleTypes={inspectVisibleTypes}
-            setInspectVisibleTypes={setInspectVisibleTypes}
-            defaultInspectVisibleTypes={DEFAULT_INSPECT_VISIBLE}
-            onMapReady={setMapInstance}
-            globeMode={globeMode}
-            pendingFeature={pendingFeature}
-            setPendingFeature={setPendingFeature}
-            initialPosition={initialPositionRef.current || undefined}
-            initialSlider={initialSlider}
-            onSliderChange={setSliderPosition}
-          />
-          <LaunchPointControl />
+          <LaunchProvider>
+            <Header
+              mode={modeName}
+              setMode={setModeName}
+              zoom={zoom}
+              visibleTypes={visibleTypes}
+              language={language}
+              setLanguage={setLanguage}
+              globeMode={globeMode}
+              setGlobeMode={setGlobeMode}
+              activeFeature={activeFeature}
+              onGersSelect={({ gersId }) => {
+                setPendingFeature({ gersId, searchAll: true });
+              }}
+            />
+            <Map
+              mode={modeName}
+              language={language}
+              features={features}
+              setFeatures={setFeatures}
+              zoom={zoom}
+              setZoom={setZoom}
+              setActiveFeature={setActiveFeature}
+              activeFeature={activeFeature}
+              visibleTypes={visibleTypes}
+              setVisibleTypes={setVisibleTypes}
+              defaultVisibleTypes={DEFAULT_VISIBLE}
+              inspectVisibleTypes={inspectVisibleTypes}
+              setInspectVisibleTypes={setInspectVisibleTypes}
+              defaultInspectVisibleTypes={DEFAULT_INSPECT_VISIBLE}
+              onMapReady={setMapInstance}
+              globeMode={globeMode}
+              pendingFeature={pendingFeature}
+              setPendingFeature={setPendingFeature}
+              initialPosition={initialPositionRef.current || undefined}
+              initialSlider={initialSlider}
+              onSliderChange={setSliderPosition}
+            />
+            <LaunchPointControl />
+          </LaunchProvider>
         </MapContext.Provider>
         <TermsOfUse />
       </ThemeProvider>

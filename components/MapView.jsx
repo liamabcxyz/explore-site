@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
 import "@/components/CustomControls.css";
 import SidePanel from "@/components/SidePanel";
+import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import BookmarkDial from "@/components/BookmarkDial";
 import FeaturePopup from "@/components/FeatureSelector";
 import { loadPmtilesFromStac } from "@/lib/stacService";
@@ -106,6 +107,19 @@ export default function Map({
   const [activeTab, setActiveTab] = useState("layers");
 
   const [lastClickedCoords, setLastClickedCoords] = useState();
+
+  // Surface the profile view automatically whenever the user picks a new
+  // observer point on the map — otherwise there's nothing telling them the
+  // analysis landed anywhere. Purely additive: reacts to LaunchContext, calls
+  // the same setters the click handler below already owns, and never touches
+  // that handler's own logic.
+  const launchAnalysis = useLaunchAnalysis();
+  useEffect(() => {
+    if (launchAnalysis?.analysis?.observer) {
+      setActiveTab("features");
+      setDrawerOpen(true);
+    }
+  }, [launchAnalysis?.analysis?.observer]);
 
   const visibleTypesRef = useRef(visibleTypes);
   useEffect(() => {

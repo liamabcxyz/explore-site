@@ -161,3 +161,39 @@
 ## 已知的良性噪音（不是我改动引入的）
 
 - `npm run build` 生成静态页面时会打印一段 `ReferenceError: Worker is not defined` 的堆栈（在 SSR 阶段，`maplibregl.setRTLTextPlugin` 内部某处试图用 `Worker`，Node 环境没有这个全局对象）。这是精简之前、原始仓库就有的行为，不影响最终产物（页面依然正常生成、`npm run preview` 能跑），先记录在案，不在本次改造范围内修。
+
+---
+
+## 7. Phase 4 —— 剖面图 / Why 解释器（`ProfilePanel`）
+
+对照 PRD/工程设计 v0.2 核实进度后，`components/SidePanel.jsx` 里 `activeTab === "features"` 分支一直是"Analysis coming soon"占位文案（第 1B/4 节留下的 TODO），这是 M2 MVP 闭环里最后一块缺的 P0 功能——用户选完发射点、点地图上任意一点，要能看到"这个点看不看得见 + 沿视线被哪些楼挡住"的解释，而不只是网格上的一个红绿点。
+
+**算法层新增**：`lib/viewshed/sightline.js` 的 `computeMinAlt` 只返回"最大 req"这一个数字，不保留是哪几栋楼、挡在哪个距离——画剖面图需要明细。新增 `lib/viewshed/computeProfile.js` 的 `computeSightlineProfile()`，复用（不改）`intersectSegmentBuilding`，对每栋建筑单独调用、收集 `{distance, height, req}` 按距离排序返回，手法上跟 `computeViewshed.js` 一样"以 launch 为原点投影到局部米制平面"。单测 `__tests__/computeProfile.test.js`，沿用既有的手算验证风格（1-2 栋已知位置/高度的楼，手推期望值）。
+
+**架构上延续了第 6 节"不改 `MapView.jsx` 核心状态机"的原则，但做了一处小突破**：`LaunchPointControl.jsx`（生产者，在 `MapView.jsx` 外面）需要把"用户点了哪个观察点、算出的剖面结果"传给挂在 `SidePanel.jsx`（`MapView.jsx` 内部子树）里的新 `ProfilePanel`（消费者）——两者不是父子关系，没法直接传 props，又不想为这一件事把 `MapView.jsx` 改造成受控组件。做法是新增一个跟 `lib/MapContext.js` 同款写法的 `lib/LaunchContext.js`（`createContext(null)` + `useLaunchAnalysis()`），配一个只放 state、不放业务逻辑的极薄 `components/launch/LaunchProvider.jsx`，在 `app/page.jsx` 里包一层。`ProfilePanel` 完全不需要经过 `MapView.jsx` 的 props 就能读到最新分析结果。
+
+**唯一动了 `MapView.jsx` 的地方**：选观察点后如果不自动展开侧边栏切到 Features 标签页，用户点完什么反应都看不到，容易被当成没做出来。跟用户确认过，这个"自动展开"值得为它加一个新的、独立的 `useEffect`（只监听 `LaunchContext` 里 `analysis?.observer` 的变化，调用 `MapView.jsx` 自己已有的 `setActiveTab`/`setDrawerOpen`），不碰第 226 行那个既有的点击处理器/状态机代码本身——这是本次唯一一处动到 `MapView.jsx` 的地方，而且是纯新增、不改现有逻辑。
+
+**选观察点的交互**：`LaunchPointControl.jsx` 里新增第三个独立的 `map.on("click", ...)` 监听器（跟"放置发射点"的监听器平行、各管各的，靠 `placingRef` 互斥）。故意**不要求点在某个已渲染的网格圆点上**——直接用点击的精确经纬度重新算一次剖面，比"必须点中一个 5px 的圆点"体验更好、实现也更简单（省了 `queryRenderedFeatures` 查网格图层这一步）；用 `makeLocalProjector` 把点击位置换算成到发射点的距离，超出 `ANALYSIS_RADIUS`（300m，跟网格计算共用同一个常量）就忽略，保证算出来的剖面背后总有查询到的建筑数据撑着。放置/移动发射点时顺带清掉旧的观察点选择（否则会残留一个指向旧发射点位置的过期剖面）。
+
+**`ProfilePanel.jsx`（`components/analysis/`，工程设计 v0.2 早就规划好的目录落点）** 用调过色的 SVG 手画剖面示意图（仓库里没有图表库依赖，不新增）：横轴距离、纵轴高度，视线画成蓝色直线，**故意在建筑柱子之后画视线**——这样挡住视线的那栋楼会在视觉上把线"切断"，比线永远画在最上层直观。颜色上刻意复用 `LaunchPointControl.jsx` 里网格圆点已经在用的同一套红/黄/绿（`#d32f2f`/`#fbc02d`/`#2e7d32`），不是套 dataviz skill 默认调色板里不同色号的状态色——同一个产品里"红=挡住"这件事只应该有一套视觉语言。产生 `minAlt` 的那栋楼（真正的遮挡者）高亮红色 + 直接标注高度/距离，其余相交但非决定性的楼用中性灰，每根柱子挂一个原生 `<title>` 当轻量 hover，不为此引入新依赖。三种状态（未设发射点 / 已设发射点未选点 / 已出结果）配轻量 RTL 测试 `__tests__/ProfilePanel.test.js`，断言文案而不是 SVG 具体坐标。
+
+**验证**：`npm test`（15 suite / 609 test 全过，含新增两个测试文件）、`npm run build` 通过（`Worker is not defined` 仍是上面记录过的良性噪音，跟本次改动无关）。真实交互没能在这次会话里用 Playwright 端到端跑通——这台机器上 headless Chromium 子进程连不上外网（`curl` 直接请求 STAC 目录是通的，但 Playwright 启动的浏览器进程 fetch 报 `ERR_CONNECTION_RESET`），看起来是这台机器的沙箱网络策略只放行了部分进程，不是代码问题；交给用户在真实浏览器里实测（旧金山金融区，设发射点、点一个被楼挡住的位置确认剖面图和结论文字弹出，再点一个视野开阔的位置对比）。
+
+---
+
+## 8. 可视化改版 —— 红绿点换成放射状扇形 + 修正 f(k) 公式
+
+用户带来了一份新的数学建模文档《烟花可视性数学模型.md》，同时提了个很直接的意见：不喜欢现在这种"红绿散点"的呈现方式，问能不能做成"放射性的"。这份文档比之前的 PRD/工程设计详细得多——把可见度重新形式化成一个质量泛函 Q(o)，还给了一个当前代码里**没有**用到的关键公式：圆盘被地平线切割后的可见面积精确解 f(k)。
+
+**先写了一份报告，没直接动手**：把文档里的每个概念（掠射高度 a、f(k)、距离偏好、天气衰减 W、视角门 G、区域测度 μ）跟现有代码一一对照，标出哪些已经实现（a ↔ `computeMinAlt`/`req`，完全一致）、哪些能直接换掉（只有 f(k)——`fractionVisible` 一直是线性近似，不是文档给的几何精确解）、哪些需要新的外部输入或产品决策所以不建议现在做（天气需要接气象 API；视角门/主观权重文档自己都说是"留给真实用户反馈校准的自由参数"，跟 `scoring.js` 里 `angleScore`/`distScore`/`openness`/`score` 四个"只定签名不实现"的既有做法是一个判断）。"放射性"给了三个方向（A：图层换成 MapLibre 原生 `heatmap`，仓库里 `all-density-circle.json` 已经这么用过，照抄零风险；B：采样本身从方格坐标换成极坐标，画成扇形色块，真正从发射点放射出去；C：B 再叠一层 heatmap）。用户选了 **B**，并确认 f(k) 精确公式要跟着一起换。
+
+**`lib/viewshed/scoring.js`**：`fractionVisible` 从 `1 - (minAlt-lower)/(upper-lower)` 的线性插值换成 `k = (minAlt-targetHeight)/shellRadius; f(k) = [arccos(k) - k·√(1-k²)]/π`。两者在 k=0（掠射高度正好卡在烟花球中心）时都等于 0.5——这是圆的对称性决定的，不代表两个公式吻合——但偏离中心后差别很明显，k=0.5 时线性给 0.25、几何精确值约 0.196。`computeSightlineProfile`（Phase 4 剖面图用的那个）内部调的也是这同一个 `fractionVisible`，不用改代码就跟着变精确了。
+
+**`lib/viewshed/computeViewshed.js`**：采样循环从 Cartesian 方格（`for y... for x...` 裁圆）换成极坐标（`for ringIndex... for sectorIndex...`，`radialSpacing` 控制环间距、`angularSpacing` 控制角度间距），每个 (ring, sector) 采样格输出一个**扇形 Polygon**（四个角反投影成经纬度）而不是一个 Point——签名也跟着换了，`gridSpacing` 参数没了，换成 `radialSpacing`/`angularSpacing` 两个。这是一处**破坏性**的函数签名改动，好在只有 `LaunchPointControl.jsx` 一个调用方，直接改掉就行，不用留兼容层。
+
+**`components/launch/LaunchPointControl.jsx`**：地图图层从 `circle`（画点）换成 `fill`（画扇形色块），`fill-color` 复用原来那套红/黄/绿插值，`fill-outline-color` 给个很淡的描边让相邻扇形之间有条细线，不然大片同色区域会糊成一块看不出网格感。图层 id 从 `vantage-viewshed-points` 改名 `vantage-viewshed-sectors`（这个字符串只在这一个文件里出现，改名不影响别处）。采样密度定为 `RADIAL_SPACING=20m`、`ANGULAR_SPACING=6°`（每圈 60 个扇区），300m 半径算下来 15 圈 × 60 扇区 = 900 格，跟之前方格网格"约 2150 个点"同一个数量级，视觉密度不会突然变粗糙。
+
+**没做的**（报告里就说清楚了，不是这次漏掉）：距离甜蜜区高亮环、方向开阔度 Ω(o)、天气衰减——虽然极坐标这个坐标系天然适合承接这些（甜蜜区就是某个 r 上加一圈描边，方向开阔度就是按角度扇区统计），但都需要新的输入或产品判断，留到用户明确要做的时候再加。
+
+**测试**：`__tests__/scoring.test.js` 两个"linear"相关的用例改成手推几何公式期望值（其中一版第一次手算错了小数点后第四位，被 Jest 抓出来纠正了）；`__tests__/computeViewshed.test.js` 整个重写——原来靠精确坐标匹配一个网格点（`findCell`）的写法在极坐标下不适用，换成"选一组能让某个扇区中心正好落在建筑连线上的 ring/sector 参数（比如 `angularSpacing=120°` 时 sector 1 的中点正好在 180°），断言 3 个扇区里精确有 1 个被挡、2 个畅通"；`__tests__/computeProfile.test.js` 的两处 frac 期望值也从线性公式换成同款手推的 `arccos` 表达式。`npm test`：15 suite / 609 test 全过。`npm run lint`、`npm run build` 都过（`Worker is not defined` 仍是记录过的良性噪音）。真实交互还是受限于这台机器 headless 浏览器连不上外网，没能跑 Playwright 截图，交给用户在真实浏览器里看放射状扇形是否符合预期。
