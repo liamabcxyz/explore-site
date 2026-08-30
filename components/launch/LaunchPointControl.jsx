@@ -9,6 +9,7 @@ import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
 import { computeViewshed } from "@/lib/viewshed/computeViewshed";
 import { computeSightlineProfile } from "@/lib/viewshed/computeProfile";
+import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
 
 const ANALYSIS_RADIUS = 300;
 const RADIAL_SPACING = 20; // meters between rings
@@ -21,10 +22,15 @@ export default function LaunchPointControl() {
   const setAnalysis = useLaunchAnalysis()?.setAnalysis;
   const [placing, setPlacing] = useState(false);
   const [launch, setLaunch] = useState(null);
-  const [height, setHeight] = useState(100);
-  const [shellRadius, setShellRadius] = useState(20);
+  // Caliber drives both burst height and shell radius (烟花可视性数学模型.md
+  // §1.4) — no manual override of the derived values, since letting a user
+  // set height/radius independently is exactly the physically-inconsistent-
+  // combination bug this replaces.
+  const [caliber, setCaliber] = useState(3);
+  const { targetHeight, shellRadius } = deriveShellParams(caliber);
   const [observer, setObserver] = useState(null);
   const markerRef = useRef(null);
+  const observerMarkerRef = useRef(null);
   const placingRef = useRef(placing);
 
   useEffect(() => {
@@ -45,11 +51,21 @@ export default function LaunchPointControl() {
         type: "fill",
         source: SOURCE_ID,
         paint: {
+          // Colored by the discrete `category` (lib/viewshed/scoring.js's
+          // visibilityCategory), not the continuous `score` — a cell that's
+          // fully clear but at an uncomfortable angle and a cell that's
+          // actually blocked by a building both score 0, but they're
+          // different problems and used to render as the same red. "blocked"
+          // and "poor-angle" get genuinely different hues so that distinction
+          // survives onto the map; `frac`/`score` are still in each cell's
+          // properties for anyone who wants the underlying numbers.
           "fill-color": [
-            "interpolate", ["linear"], ["get", "frac"],
-            0, "#d32f2f",
-            0.5, "#fbc02d",
-            1, "#2e7d32",
+            "match", ["get", "category"],
+            "blocked", "#d32f2f",
+            "poor-angle", "#7e57c2",
+            "partial", "#fbc02d",
+            "good", "#2e7d32",
+            "#9e9e9e",
           ],
           "fill-opacity": 0.55,
           "fill-outline-color": "rgba(0,0,0,0.15)",
@@ -108,6 +124,27 @@ export default function LaunchPointControl() {
     }
   }, [map, launch]);
 
+  // Observer marker — a person icon rather than another colored pin, so it
+  // reads as "this is where you're standing" and isn't confused with the
+  // launch point's pin at a glance.
+  useEffect(() => {
+    if (!map) return;
+    if (observerMarkerRef.current) {
+      observerMarkerRef.current.remove();
+      observerMarkerRef.current = null;
+    }
+    if (observer) {
+      const el = document.createElement("div");
+      el.textContent = "🧍";
+      el.style.fontSize = "28px";
+      el.style.lineHeight = "1";
+      el.style.filter = "drop-shadow(0 1px 2px rgba(0,0,0,0.6))";
+      observerMarkerRef.current = new maplibregl.Marker({ element: el, anchor: "bottom" })
+        .setLngLat([observer.lng, observer.lat])
+        .addTo(map);
+    }
+  }, [map, observer]);
+
   useEffect(() => {
     if (!map || !map.getSource(SOURCE_ID)) return;
     // MapView adds its own ~100 layers asynchronously as PMTiles sources load,
@@ -127,7 +164,7 @@ export default function LaunchPointControl() {
 
     const result = computeViewshed({
       launch,
-      targetHeight: height,
+      targetHeight,
       shellRadius,
       analysisRadius: ANALYSIS_RADIUS,
       radialSpacing: RADIAL_SPACING,
@@ -136,7 +173,7 @@ export default function LaunchPointControl() {
     });
 
     map.getSource(SOURCE_ID).setData(result);
-  }, [map, launch, height, shellRadius]);
+  }, [map, launch, caliber]);
 
   // Full sightline breakdown for whichever point the user picked, published
   // to LaunchContext so ProfilePanel (mounted elsewhere, inside SidePanel)
@@ -150,7 +187,7 @@ export default function LaunchPointControl() {
       return;
     }
     if (!map || !observer) {
-      setAnalysis({ launch, height, shellRadius, observer: null, profile: null });
+      setAnalysis({ launch, targetHeight, shellRadius, caliber, observer: null, profile: null });
       return;
     }
 
@@ -161,13 +198,13 @@ export default function LaunchPointControl() {
     const profile = computeSightlineProfile({
       observer,
       launch,
-      targetHeight: height,
+      targetHeight,
       shellRadius,
       buildings,
     });
 
-    setAnalysis({ launch, height, shellRadius, observer, profile });
-  }, [map, launch, observer, height, shellRadius, setAnalysis]);
+    setAnalysis({ launch, targetHeight, shellRadius, caliber, observer, profile });
+  }, [map, launch, observer, caliber, setAnalysis]);
 
   return (
     <Paper
@@ -188,10 +225,20 @@ export default function LaunchPointControl() {
         </Button>
         {launch && (
           <>
-            <Typography variant="caption">Launch height: {height}m</Typography>
-            <Slider min={10} max={400} value={height} onChangeCommitted={(_, v) => setHeight(v)} />
-            <Typography variant="caption">Shell radius: {shellRadius}m</Typography>
-            <Slider min={5} max={80} value={shellRadius} onChangeCommitted={(_, v) => setShellRadius(v)} />
+            <Typography variant="caption">
+              Caliber: {caliber}&quot; · burst height ~{Math.round(targetHeight)}m · shell radius ~{Math.round(shellRadius)}m
+            </Typography>
+            <Slider
+              min={3}
+              max={12}
+              step={null}
+              marks={STANDARD_CALIBERS_INCHES.map((c) => ({ value: c, label: `${c}"` }))}
+              value={caliber}
+              onChangeCommitted={(_, v) => setCaliber(v)}
+            />
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              🔴 blocked by a building · 🟣 clear but a bad angle (too close/far) · 🟡 partially blocked · 🟢 good spot
+            </Typography>
             <Button
               size="small"
               onClick={() => {

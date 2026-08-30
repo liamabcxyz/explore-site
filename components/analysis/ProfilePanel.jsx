@@ -10,6 +10,10 @@ import { useLaunchAnalysis } from "@/lib/LaunchContext";
 const BLOCKED_COLOR = "#d32f2f";
 const PARTIAL_COLOR = "#fbc02d";
 const VISIBLE_COLOR = "#2e7d32";
+// Matches the "poor-angle" fill-color in LaunchPointControl.jsx's viewshed
+// layer — deliberately not on the red-yellow-green line-of-sight scale,
+// since "clear view, bad angle" is a different problem from "blocked."
+const POOR_ANGLE_COLOR = "#7e57c2";
 
 function verdictColor(frac) {
   if (frac >= 0.66) return VISIBLE_COLOR;
@@ -22,6 +26,23 @@ function verdictLabel(frac) {
   if (frac >= 0.33) return "Partially blocked";
   return "Blocked";
 }
+
+// For the composite score, colored/labeled by scoring.js's visibilityCategory
+// rather than by the same frac-style thresholds as verdictColor/verdictLabel —
+// a fully clear-but-badly-angled point must not read as "Blocked."
+const CATEGORY_COLOR = {
+  blocked: BLOCKED_COLOR,
+  "poor-angle": POOR_ANGLE_COLOR,
+  partial: PARTIAL_COLOR,
+  good: VISIBLE_COLOR,
+};
+
+const CATEGORY_LABEL = {
+  blocked: "Blocked",
+  "poor-angle": "Bad angle",
+  partial: "Partially blocked",
+  good: "Good spot",
+};
 
 const WIDTH = 280;
 const HEIGHT = 170;
@@ -151,6 +172,17 @@ export default function ProfilePanel({ isDark }) {
             ? `Fully blocked — you'd need to reach ${Math.round(minAlt)}m to clear the tallest obstruction.`
             : `Partially blocked — reaching ${Math.round(minAlt)}m would clear it entirely.`}
         {" "}{Math.round(profile.totalDistance)}m from the launch point.
+      </Typography>
+
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+        <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: CATEGORY_COLOR[profile.category], flexShrink: 0 }} />
+        <Typography variant="caption">
+          Overall viewing quality: {Math.round(profile.score * 100)}% ({CATEGORY_LABEL[profile.category]})
+        </Typography>
+      </Stack>
+      <Typography variant="caption" component="p" sx={{ mb: 1.5, color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)" }}>
+        Accounts for the shell&apos;s apparent size ({profile.theta.toFixed(1)}°) and viewing angle
+        ({profile.phi.toFixed(1)}°), not just whether anything blocks it.
       </Typography>
 
       <SightlineChart profile={profile} isDark={isDark} />

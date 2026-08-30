@@ -37,6 +37,30 @@ describe("computeSightlineProfile", () => {
     expect(result.hits).toEqual([]);
     expect(result.minAlt).toBe(-Infinity);
     expect(result.frac).toBe(1);
+    // Close-in and steep (heightDiff=98.4 over 100m -> ~44.5°) penalizes the
+    // composite score even though the line of sight itself is fully clear —
+    // this is elevationScore's high-side falloff doing its job, not a bug.
+    // Crucially, this must categorize as "poor-angle", never "blocked" —
+    // nothing is actually in the way here.
+    expect(result.theta).toBeCloseTo(16.2265, 3);
+    expect(result.phi).toBeCloseTo(44.5379, 3);
+    expect(result.score).toBeCloseTo(0.0062075, 5);
+    expect(result.category).toBe("poor-angle");
+  });
+
+  it("scores near 1 at a clean sweet-spot distance with nothing blocking", () => {
+    const farObserver = { lat: 0, lng: 250 / METERS_PER_DEGREE };
+    const result = computeSightlineProfile({
+      observer: farObserver,
+      launch,
+      targetHeight: 100,
+      shellRadius: 20,
+      buildings: [],
+    });
+    expect(result.frac).toBe(1);
+    expect(result.score).toBeCloseTo(result.frac, 5);
+    expect(result.score).toBeCloseTo(1, 5);
+    expect(result.category).toBe("good");
   });
 
   it("reports distance/req for a single blocking building", () => {

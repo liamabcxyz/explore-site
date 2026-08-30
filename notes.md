@@ -197,3 +197,45 @@
 **没做的**（报告里就说清楚了，不是这次漏掉）：距离甜蜜区高亮环、方向开阔度 Ω(o)、天气衰减——虽然极坐标这个坐标系天然适合承接这些（甜蜜区就是某个 r 上加一圈描边，方向开阔度就是按角度扇区统计），但都需要新的输入或产品判断，留到用户明确要做的时候再加。
 
 **测试**：`__tests__/scoring.test.js` 两个"linear"相关的用例改成手推几何公式期望值（其中一版第一次手算错了小数点后第四位，被 Jest 抓出来纠正了）；`__tests__/computeViewshed.test.js` 整个重写——原来靠精确坐标匹配一个网格点（`findCell`）的写法在极坐标下不适用，换成"选一组能让某个扇区中心正好落在建筑连线上的 ring/sector 参数（比如 `angularSpacing=120°` 时 sector 1 的中点正好在 180°），断言 3 个扇区里精确有 1 个被挡、2 个畅通"；`__tests__/computeProfile.test.js` 的两处 frac 期望值也从线性公式换成同款手推的 `arccos` 表达式。`npm test`：15 suite / 609 test 全过。`npm run lint`、`npm run build` 都过（`Worker is not defined` 仍是记录过的良性噪音）。真实交互还是受限于这台机器 headless 浏览器连不上外网，没能跑 Playwright 截图，交给用户在真实浏览器里看放射状扇形是否符合预期。
+
+---
+
+## 9. 口径驱动发射参数 + 复合可见度评分（P0 两项）
+
+用户又带来一份更完整的数学建模文档《烟花可视性数学模型.md》，比第 8 节引入 f(k) 的那份还要系统——用两个探索 agent 把文档跟当前代码逐条核对后确认：f(k)（§3.2）已经在第 8 节接上了；口径决定弹道参数（§1.4）、视角大小门 G(θ)（§4.1）、仰角舒适区 E(φ)（§4.2）、天气衰减 W（§5）、多点分布 μ(b)（§6）全部没做。跟用户对齐优先级后，天气衰减和多点分布记进新建的 `todo.md`（P1，暂不做），这次动手做前两个 P0：口径驱动参数、G(θ)/E(φ) 复合评分。
+
+**`lib/viewshed/caliber.js`（新增）**：`deriveShellParams(caliberInches)` 就是文档给的两条公式，`targetHeight = 30×c`、`shellRadius = 6.9×c`（c 单位英寸）。不做校验——只接受标准口径是 UI 层的事，这个函数本身跟 `fractionVisible` 一样，谁传什么就算什么。
+
+**`components/launch/LaunchPointControl.jsx`**：原来"发射高度"和"烟花半径"两个互相独立的滑杆，换成一个口径滑杆（`step={null}` + `marks` 卡在 3/4/6/8/10/12 英寸六个标准值上，不能连续拖）,高度和半径完全由口径导出，**不提供手动覆盖**——这是文档自己的结论（"让用户选活动规模，R 与 z_b 自动带出"），也是这个功能存在的意义本身,提供覆盖等于把"两个滑杆物理不自洽"这个问题原样搬回来。
+
+**`lib/viewshed/scoring.js`**：新增 `elevationAngleDeg`、`apparentAngularDiameterDeg` 两个纯几何函数，和 `angularSizeGate`（视角大小门 G）、`elevationScore`（仰角舒适度 E）两个"数学文档只给了定性描述、没给显式公式"的函数——跟 `lib/geo/normalizeBuilding.js` 的 `HEIGHT_SOURCE_CONFIDENCE` 一个性质，是这次会话自己给的第一版猜测,不是从文档derive出来的,代码注释里写清楚了：
+- `angularSizeGate` 用 logistic 函数，中点定在文档给的 0.3°-0.5° 阈值区间内（0.4°），陡峭度自己选的（22/度），让这个区间大致对应 10%→90% 的过渡。
+- `elevationScore` 用 smoothstep 分段——文档原文自相矛盾（一会儿说"10°-35° 是甜蜜区"，一会儿说"低于 15°/高于 45° 要扣分"），这次的处理是把 15°/45° 当成硬边界，5° 起步爬升，让 10° 正好卡在半credit的位置，不是两头都占。
+
+`score()` 把这些拼成 Q(o) 的简化版：`frac × weather(默认1，天气还没做) × angularSizeGate(θ) × elevationScore(φ)`——`openness` 这一项完全**没有**乘进去（不是乘个 0），因为两份文档都没给公式，乘个占位的 0 只会是测不到、永远死掉的代码。原来 `scoring.js` 里的 `angleScore`/`distScore` 两个桩函数直接删掉——它们是旧技术设计文档"加权求和"公式的产物，新文档的 Q(o) 结构里根本没有对应项（仰角已经把距离偏好包含进去了），继续留着就是两份文档、两种打分逻辑并存的死代码。
+
+**`lib/viewshed/computeViewshed.js`/`computeProfile.js`**：`EYE_HEIGHT` 常量原来两个文件各写一份 1.6，这次改成从 `scoring.js` 统一 import。每个网格格子/每次点击剖面，除了原来的 `frac` 之外多算一个 `score`。**地图上的色块渲染源从 `frac` 换成了 `score`**——这是一处会让人一眼看着奇怪但其实是设计意图的改动：发射点正下方那一圈，就算完全没有建筑遮挡（`frac=1`），因为抬头看的角度太陡（仰角超过 45°），`elevationScore=0`，`score` 也会是 0，色块显示成红色。真机截图验证过：金融区一个真实点，`frac=100%`（完全可见）但 `Overall viewing quality` 显示 `0% (Blocked)`，面板上有一行文字专门解释这个"看得见但角度太差"的情况,不是 bug。
+
+**`components/analysis/ProfilePanel.jsx`**：原来的"Visible — N% of the shell"这行原样保留（这行文字被测试钉死了），下面新加一行"Overall viewing quality: N% (label)"显示复合分数，再加一行小字说明"这个数字包含了视角大小和仰角，不只是有没有被挡"。
+
+**测试**：新增 `__tests__/caliber.test.js`（6 个标准口径 + 1 个非标准口径校验函数本身不做限制）；`scoring.test.js` 大改——删掉 `angleScore`/`distScore` 相关用例，新增 `elevationAngleDeg`/`apparentAngularDiameterDeg`/`angularSizeGate`/`elevationScore`/`score` 的手推期望值（拿计算器/node 独立推一遍公式，不是导入内部常量再跑一遍同样的代码）；`computeViewshed.test.js` 新增一个用例——用 300m 半径、100m 间距、360° 一个扇区的粗网格,专门验证"同样 `frac=1`,离发射点 50m 的环因为仰角太陡 `score` 精确等于 0,150m/250m 的环因为落在仰角甜蜜区 `score` 精确等于 1"；`computeProfile.test.js`/`ProfilePanel.test.js` 补上 `theta`/`phi`/`score` 字段的断言。`npm test`：16 suite / 634 test 全过，`npm run build` 通过。这次机器上 Playwright 的网络问题不知为何消失了，端到端跑通了真实浏览器截图：口径滑杆卡点正确、发射点周围红圈符合预期、点击后剖面面板的"Overall viewing quality"行渲染正确。
+
+---
+
+## 10. 修正配色 —— "核心区"和"看不见"不能共用红色
+
+用户看完上一节的截图后指出一个真实的设计问题：地图按 `score` 上色之后，发射点正下方那圈"角度太陡"的区域和真正被建筑挡住的区域，颜色都是红——两件完全不同的事（一个是"物理上就是看不见"，一个是"技术上能看见但站的位置/角度不合适"）被压缩成了同一个视觉信号，这不行。
+
+**根因**：`score = frac × weather × angularSizeGate(θ) × elevationScore(φ)` 是个连续乘积，`frac=0`（真被挡）和 `elevationScore=0`（角度不好但没被挡）都会让 `score` 算出 0，用同一根红-黄-绿渐变上色，自然分不清。
+
+**修法**：不再用连续的 `score` 上色，改成离散的四类——`lib/viewshed/scoring.js` 新增两个函数：
+- `comfortFactor(thetaDeg, phiDeg)`：把 `score()` 里"跟遮挡无关"的那部分（视角大小门 × 仰角舒适度）单独拆出来，`score()` 本身不变。
+- `visibilityCategory(frac, comfort)`：按优先级分四类——`frac` 很低（<0.15）→ **blocked**（真被挡，跟角度无关，判断顺序上这条最先生效）；不然如果 `comfort` 很低（<0.5）→ **poor-angle**（没被挡但角度/距离不合适，这是这次要新增的第三种颜色）；不然 `frac` 还没到 0.85 → **partial**（角度没问题但只挡了一部分）；否则 → **good**。三个阈值都是这次自己给的第一版猜测，跟 `angularSizeGate`/`elevationScore` 一个性质。
+
+**`computeViewshed.js`/`computeProfile.js`**：每个网格格子/剖面结果里多一个 `category` 字段（`frac`/`score` 两个数值字段原样保留，给想要原始数据的人）。
+
+**`components/launch/LaunchPointControl.jsx`**：`fill-color` 从按 `score` 连续插值换成按 `category` 精确匹配（`match` 表达式）——红=blocked、**紫=poor-angle**（新增，特意选了一个不在红黄绿光谱上的颜色，一眼就能看出"这是另一种问题"）、黄=partial、绿=good。面板文案也换成对应的图例说明。
+
+**`components/analysis/ProfilePanel.jsx`**：原来"Overall viewing quality"那一行的颜色/文字是拿 `verdictColor(profile.score)`/`verdictLabel(profile.score)` 复用第一版验证结果那一行的三档阈值函数算的——这次单独建了 `CATEGORY_COLOR`/`CATEGORY_LABEL` 两张表，跟地图配色完全对应（"Bad angle"对应紫色），不再共用那两个只认三档红黄绿的旧函数。
+
+**验证**：真机截图，旧金山金融区实测——发射点周围出现一圈干净的**紫色**环，和外围真正被高楼挡住的**红色**区域清楚分开；`querySourceFeatures` 统计出四个分类都有真实数据命中（`poor-angle` 415、`blocked` 1273、`good` 94、`partial` 8）。`npm test`：16 suite / 642 test 全过（新增 8 个用例：`comfortFactor`/`visibilityCategory` 的单测，加上已有测试文件里补的 `category` 断言），`npm run build` 通过。
