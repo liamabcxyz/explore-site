@@ -4,6 +4,7 @@ import "@/components/CustomControls.css";
 import Header from "@/components/nav/Header";
 import Map from "@/components/MapView";
 import MapContext from "@/lib/MapContext";
+import LaunchPointControl from "@/components/launch/LaunchPointControl";
 import TermsOfUse from "@/components/nav/TermsOfUse";
 import { keepTheme, darkTheme, lightTheme } from "@/lib/themeUtils";
 import { useState, useEffect, useRef } from "react";
@@ -142,7 +143,6 @@ export default function Home() {
             mode={modeName}
             setMode={setModeName}
             zoom={zoom}
-            setZoom={setZoom}
             visibleTypes={visibleTypes}
             language={language}
             setLanguage={setLanguage}
@@ -176,6 +176,7 @@ export default function Home() {
             initialSlider={initialSlider}
             onSliderChange={setSliderPosition}
           />
+          <LaunchPointControl />
         </MapContext.Provider>
         <TermsOfUse />
       </ThemeProvider>

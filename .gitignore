@@ -5,3 +5,4 @@ out
 public/mapbox-gl-rtl-text.js
 public/maplibre-gl-worker.mjs
 public/maplibre-gl-shared.mjs
+.DS_Store
