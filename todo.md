@@ -58,3 +58,27 @@ Koschmieder 公式(文档 §5):`W = exp(-3.912·s̄/V)`,s̄ 为代表性斜距,V
 - **P0 去掉全图层 mousemove hit-test**：拖地图会立刻顺很多。VANTAGE 不需要"悬停任何要素都变手型"。（还没做，同样要动 `MapView.jsx`。）
 - **P1 裁建筑 + Worker —— 已完成**：建筑查询裁到分析半径内（`lib/geo/buildingsNearPoint.js`），`computeViewshed` 挪进 `lib/viewshed/worker.js` 跑（原来写好但没接的那个）。点发射点不再冻住主线程。实现见 `notes.md`。
 - **P2 拆掉 Explore/Inspect 双图**：v0.2 本来就要删对比滑条，现在还在付双倍 GPU/瓦片。动 `MapView.jsx` 最深，单独做。（还没做。）
+
+---
+
+# 烟花可视化展示
+
+## 动画和分析参数联动
+
+放发射点时的烟花动画（`components/launch/LaunchPointControl.jsx` 的 `FIREWORK_CSS` + `buildFireworkHtml`）顶点位置硬编码在 launch pin 上方 140px（屏幕空间），跟口径完全无关——3" 和 12" 的烟花动画看起来一模一样。但口径推导的 `targetHeight`（3" 约 90m，12" 约 360m）本来就是这个动画应该反映的物理量。
+
+需要：
+- 顶点高度根据 `targetHeight` 线性放缩（比如从 100px 到 300px）
+- 粒子数量、爆炸半径也随口径放缩（3" 小而紧凑、12" 大而开阔）
+- 让动画从"跟参数无关的装饰"变成"看得见的物理反馈"
+
+半小时工作量，改动集中在 `LaunchPointControl.jsx` 的 CSS + `buildFireworkHtml`。
+
+## 观察点 3D 透视预览（"从这里看是什么样"）
+
+用户选完观察点后，除了看侧栏里的数字和 sightline 图，希望能有个"从这里往发射点方向大概看一下是什么情况"的视觉预览——不用是照片写实级别的，能有个大致的场景感就行。可选实现方向：
+
+- **小改**：允许下拉/拖动地图切成 3D 倾斜视角（maplibre 的 pitch 通过 ctrl+drag 已经能实现但不发现），需要 UI 引导或者一个"tilt"按钮，让用户能在地图上看到建筑挤出（`components/map/layers/explore/buildings/building/extrusion.json`）跟烟花高度的相对关系
+- **大改**：在观察点位置渲染一个独立的 3D 迷你场景（比如面板里的一个 300×200 canvas）：前景是附近建筑的轮廓剪影、背景是天空、烟花在正确仰角处爆开——直接回答"从这里看到什么样"这个问题。既有的建筑高度数据（`normalizeBuilding`）加上 `computeSightlineProfile` 的仰角计算已经能算出所需的所有几何信息，不需要额外数据源
+
+小改先做能立刻缓解痛点；大改工作量更大但是"能一眼看懂"的杀手锏，属于 `notes.md` 里那种可以单独开个 session 的项。
