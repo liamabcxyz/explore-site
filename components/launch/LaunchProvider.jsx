@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import LaunchContext from "@/lib/LaunchContext";
 
 // Thin state bucket, no business logic — LaunchPointControl writes the
@@ -13,13 +13,38 @@ import LaunchContext from "@/lib/LaunchContext";
 // it feeds into computeSightlineProfile, and written by ProfilePanel's
 // selector control. { mode: "ground" } is the default and matches
 // computeSightlineProfile's own default (EYE_HEIGHT) exactly.
+//
+// setClickCapturePredicate / isVantageClickAt together answer "is VANTAGE
+// keeping this click for itself?" LaunchPointControl calls the setter
+// whenever its own placing/launch state changes, storing the current
+// predicate inside a ref that lives in this provider (React 19 forbids
+// callers from mutating a ref they receive from context, so the mutation
+// stays where the ref was constructed). MapView.jsx's own click handler
+// then calls isVantageClickAt and early-returns for those clicks, so a
+// launch-point placement (or an in-radius observer pick) doesn't also pop
+// MapView's feature-inspect panel on whatever building sat under the
+// click. Both setter and reader are stable useCallback values so the
+// consumers don't re-run on every render.
 export default function LaunchProvider({ children }) {
   const [analysis, setAnalysis] = useState(null);
   const [viewerLevel, setViewerLevel] = useState({ mode: "ground", floor: 1 });
+  const clickCaptureRef = useRef(() => false);
+  const setClickCapturePredicate = useCallback((fn) => {
+    clickCaptureRef.current = fn ?? (() => false);
+  }, []);
+  const isVantageClickAt = useCallback((lngLat) => clickCaptureRef.current(lngLat), []);
 
-  return (
-    <LaunchContext.Provider value={{ analysis, setAnalysis, viewerLevel, setViewerLevel }}>
-      {children}
-    </LaunchContext.Provider>
+  const value = useMemo(
+    () => ({
+      analysis,
+      setAnalysis,
+      viewerLevel,
+      setViewerLevel,
+      setClickCapturePredicate,
+      isVantageClickAt,
+    }),
+    [analysis, viewerLevel, setClickCapturePredicate, isVantageClickAt]
   );
+
+  return <LaunchContext.Provider value={value}>{children}</LaunchContext.Provider>;
 }

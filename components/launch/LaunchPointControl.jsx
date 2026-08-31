@@ -6,6 +6,7 @@ import { Paper, Button, Typography, Slider, Stack, Switch, FormControlLabel } fr
 import { useMapInstance } from "@/lib/MapContext";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import { createHiddenBuildingSource } from "@/lib/HiddenBuildingSource";
+import { isVantageClick } from "@/lib/launchClickCapture";
 import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
 import { filterBuildingsNearPoint } from "@/lib/geo/buildingsNearPoint";
@@ -41,6 +42,7 @@ export default function LaunchPointControl() {
   const map = useMapInstance();
   const launchAnalysis = useLaunchAnalysis();
   const setAnalysis = launchAnalysis?.setAnalysis;
+  const setClickCapturePredicate = launchAnalysis?.setClickCapturePredicate;
   // Memoized so the fallback object (only used if this ever renders outside
   // a LaunchProvider) doesn't change identity every render and thrash the
   // profile effect's dependency array below.
@@ -89,6 +91,19 @@ export default function LaunchPointControl() {
   useEffect(() => {
     placingRef.current = placing;
   }, [placing]);
+
+  // Publish "does VANTAGE want to keep this click for itself?" through the
+  // launch context so MapView.jsx's own click handler can early-return
+  // instead of also opening feature-inspect on whatever building sat under
+  // the click — see lib/launchClickCapture.js for the predicate itself and
+  // components/launch/LaunchProvider.jsx for why the ref lives there.
+  useEffect(() => {
+    if (!setClickCapturePredicate) return;
+    setClickCapturePredicate((clickLngLat) =>
+      isVantageClick({ placing, launch, clickLngLat, analysisRadiusMeters: ANALYSIS_RADIUS })
+    );
+    return () => setClickCapturePredicate(null);
+  }, [setClickCapturePredicate, placing, launch]);
 
   // The actual O(cells x buildings) viewshed math now runs off the main
   // thread (lib/viewshed/worker.js is the same computeViewshed() the grid
@@ -211,10 +226,10 @@ export default function LaunchPointControl() {
     map.setLayoutProperty(ROOFTOP_LAYER_ID, "visibility", showRooftopLayer ? "visible" : "none");
   }, [map, showRooftopLayer]);
 
-  // Click-to-place — a separate listener from MapView's own click handler,
-  // so this stays fully additive with no changes to MapView.jsx. Known rough
-  // edge: clicking directly on a building while placing also still opens
-  // MapView's own feature-inspect panel underneath.
+  // Click-to-place — a separate listener from MapView's own click handler.
+  // MapView's handler defers to launchAnalysis.clickCaptureRef (published
+  // above) and early-returns for these clicks, so placing no longer also
+  // pops the feature-inspect panel on whatever building sat under the click.
   useEffect(() => {
     if (!map) return;
     const onClick = (e) => {

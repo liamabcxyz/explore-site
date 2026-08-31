@@ -3,8 +3,16 @@ import LaunchContext from "@/lib/LaunchContext";
 import ProfilePanel from "@/components/analysis/ProfilePanel";
 
 function renderWithAnalysis(analysis, { viewerLevel, setViewerLevel } = {}) {
+  // setClickCapturePredicate / isVantageClickAt are real context surface
+  // added for MapView.jsx's click deferral (lib/launchClickCapture.js);
+  // ProfilePanel doesn't touch either one, so plain no-ops keep the mock's
+  // shape aligned with LaunchProvider without teaching the tests to care.
+  const setClickCapturePredicate = () => {};
+  const isVantageClickAt = () => false;
   return render(
-    <LaunchContext.Provider value={{ analysis, viewerLevel, setViewerLevel }}>
+    <LaunchContext.Provider
+      value={{ analysis, viewerLevel, setViewerLevel, setClickCapturePredicate, isVantageClickAt }}
+    >
       <ProfilePanel isDark={false} />
     </LaunchContext.Provider>
   );

@@ -238,6 +238,14 @@ export default function Map({
 
     // Click handler
     map.on("click", (e) => {
+      // Defer to the launch flow when it's consuming this click (placing a
+      // launch point, or picking an observer inside the analysis radius) —
+      // otherwise the feature-inspect panel pops on whatever building sat
+      // under the click, on top of the launch/observer marker the user
+      // actually meant to drop. See lib/launchClickCapture.js and
+      // components/launch/LaunchProvider.jsx's isVantageClickAt.
+      if (launchAnalysis?.isVantageClickAt?.(e.lngLat)) return;
+
       const { targetMap, targetItems } = pickTargetMap(e);
       const interactiveIds = getInteractiveLayerIds(targetMap, targetItems);
 
@@ -280,6 +288,15 @@ export default function Map({
 
     // Cursor handler
     map.on("mousemove", (e) => {
+      // Same defer as the click handler above: when the launch flow is
+      // consuming clicks here, a pointer cursor claiming "this is an
+      // inspect-able feature" is misleading — and skipping the per-hover
+      // hit-test on every mousemove during placing is also a small win.
+      if (launchAnalysis?.isVantageClickAt?.(e.lngLat)) {
+        map.getCanvas().style.cursor = "auto";
+        return;
+      }
+
       const { targetMap, targetItems } = pickTargetMap(e);
       const interactiveIds = getInteractiveLayerIds(targetMap, targetItems);
 
