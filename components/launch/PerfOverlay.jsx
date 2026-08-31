@@ -75,6 +75,9 @@ export default function PerfOverlay() {
         <>
           <Box>query: {viewshed.queryMs.toFixed(0)}ms ({viewshed.buildingCount} bldgs)</Box>
           <Box>compute: {viewshed.computeMs.toFixed(0)}ms ({viewshed.cellCount} cells)</Box>
+          {typeof viewshed.avgCandidates === "number" && (
+            <Box>index: {viewshed.avgCandidates.toFixed(0)} avg candidates/cell</Box>
+          )}
           <Box sx={{ color: "#fff" }}>total: {(viewshed.queryMs + viewshed.computeMs).toFixed(0)}ms</Box>
         </>
       ) : (

@@ -334,6 +334,7 @@ export default function LaunchPointControl() {
             buildingCount: buildings.length,
             cellCount: grid.features.length,
             rooftopCount: rooftopLayer.features.length,
+            avgCandidates: grid.avgCandidates,
           });
         },
         { once: true }
