@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
-import { Paper, Button, Typography, Slider, Stack } from "@mui/material";
+import { Paper, Button, Typography, Slider, Stack, Switch, FormControlLabel } from "@mui/material";
 import { useMapInstance } from "@/lib/MapContext";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
@@ -27,6 +27,14 @@ const RADIAL_SPACING = 40; // meters between rings
 const ANGULAR_SPACING = 6; // degrees between sectors — 60 sectors per ring
 const SOURCE_ID = "vantage-viewshed";
 const LAYER_ID = "vantage-viewshed-sectors";
+// The rooftop layer (lib/viewshed/computeRooftopLayer.js) — one feature per
+// building, painted onto that building's own real footprint. Kept as a
+// second source/layer rather than merged into the ground grid's, so
+// toggling it is a pure client-side visibility flip (no recompute) — see
+// the "Register the viewshed source/layer" effect and the visibility-sync
+// effect below.
+const ROOFTOP_SOURCE_ID = "vantage-viewshed-rooftop";
+const ROOFTOP_LAYER_ID = "vantage-viewshed-rooftop-buildings";
 
 export default function LaunchPointControl() {
   const map = useMapInstance();
@@ -56,6 +64,15 @@ export default function LaunchPointControl() {
   // lib/geo/rooftopBase.js and todo.md P1-3.
   const [rooftopBase, setRooftopBase] = useState(0);
   const targetHeight = caliberHeight + rooftopBase;
+  // Whether the per-building rooftop layer is shown on top of the (always
+  // ground-level) grid. Purely a display toggle — both layers are computed
+  // together on every request (see the grid effect below), so flipping this
+  // is instant, no recompute. Deliberately not linked to the single
+  // observer point's ground/floor/roof picker (viewerLevel, above): this
+  // answers "what does the area look like if rooftop access were
+  // universal," a different question from "can I see it from this one
+  // specific spot I picked."
+  const [showRooftopLayer, setShowRooftopLayer] = useState(false);
   const [observer, setObserver] = useState(null);
   const markerRef = useRef(null);
   const observerMarkerRef = useRef(null);
@@ -116,10 +133,42 @@ export default function LaunchPointControl() {
           "fill-outline-color": "rgba(0,0,0,0.15)",
         },
       });
+
+      if (map.getSource(ROOFTOP_SOURCE_ID)) return;
+      map.addSource(ROOFTOP_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      // Same category-color language as the ground layer, but each feature
+      // is a real building footprint rather than a sector wedge — the whole
+      // point of computing this per building instead of per grid cell.
+      map.addLayer({
+        id: ROOFTOP_LAYER_ID,
+        type: "fill",
+        source: ROOFTOP_SOURCE_ID,
+        layout: { visibility: "none" },
+        paint: {
+          "fill-color": [
+            "match", ["get", "category"],
+            "blocked", "#d32f2f",
+            "poor-angle", "#7e57c2",
+            "partial", "#fbc02d",
+            "good", "#2e7d32",
+            "#9e9e9e",
+          ],
+          "fill-opacity": 0.85,
+          "fill-outline-color": "rgba(255,255,255,0.6)",
+        },
+      });
     };
     if (map.isStyleLoaded()) setup();
     else map.once("idle", setup);
   }, [map]);
+
+  // Pure visibility flip, no recompute — both layers are already computed
+  // and sitting in their sources whenever a launch point exists (see the
+  // grid effect below).
+  useEffect(() => {
+    if (!map || !map.getLayer(ROOFTOP_LAYER_ID)) return;
+    map.setLayoutProperty(ROOFTOP_LAYER_ID, "visibility", showRooftopLayer ? "visible" : "none");
+  }, [map, showRooftopLayer]);
 
   // Click-to-place — a separate listener from MapView's own click handler,
   // so this stays fully additive with no changes to MapView.jsx. Known rough
@@ -200,9 +249,13 @@ export default function LaunchPointControl() {
     // fill layer underneath all of them. Bump it back to the top whenever
     // the user actually interacts, rather than fighting that load order.
     if (map.getLayer(LAYER_ID)) map.moveLayer(LAYER_ID);
+    if (map.getLayer(ROOFTOP_LAYER_ID)) map.moveLayer(ROOFTOP_LAYER_ID);
 
     if (!launch) {
       map.getSource(SOURCE_ID).setData({ type: "FeatureCollection", features: [] });
+      if (map.getSource(ROOFTOP_SOURCE_ID)) {
+        map.getSource(ROOFTOP_SOURCE_ID).setData({ type: "FeatureCollection", features: [] });
+      }
       setRooftopBase(0);
       return;
     }
@@ -237,8 +290,16 @@ export default function LaunchPointControl() {
       (e) => {
         if (requestId !== requestIdRef.current) return; // superseded by a newer request
         const computeMs = performance.now() - computeStart;
-        map.getSource(SOURCE_ID).setData(e.data);
-        reportViewshedPerf({ queryMs, computeMs, buildingCount: buildings.length, cellCount: e.data.features.length });
+        const { grid, rooftop: rooftopLayer } = e.data;
+        map.getSource(SOURCE_ID).setData(grid);
+        if (map.getSource(ROOFTOP_SOURCE_ID)) map.getSource(ROOFTOP_SOURCE_ID).setData(rooftopLayer);
+        reportViewshedPerf({
+          queryMs,
+          computeMs,
+          buildingCount: buildings.length,
+          cellCount: grid.features.length,
+          rooftopCount: rooftopLayer.features.length,
+        });
       },
       { once: true }
     );
@@ -333,8 +394,19 @@ export default function LaunchPointControl() {
               value={caliber}
               onChangeCommitted={(_, v) => setCaliber(v)}
             />
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={showRooftopLayer}
+                  onChange={(e) => setShowRooftopLayer(e.target.checked)}
+                />
+              }
+              label="Show rooftop view"
+            />
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
               🔴 blocked by a building · 🟣 clear but a bad angle (too close/far) · 🟡 partially blocked · 🟢 good spot
+              {showRooftopLayer && " — bright outlines are buildings, colored by what their own roof can see"}
             </Typography>
             <Button
               size="small"

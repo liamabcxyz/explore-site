@@ -366,3 +366,37 @@
 **`ProfilePanel.jsx`**：`analysis.observerBuilding` 存在时，在剖面结果之前显示一个 `ToggleButtonGroup`（地面/楼层/楼顶）+ 选了楼层时出现的 `Slider`，选完直接触发 `LaunchPointControl.jsx` 重新算。楼高置信度不是 high 时复用第 14 节的 `CONFIDENCE_LABEL` 文案，跟高度置信度标注那套视觉语言保持一致，不另起一套。
 
 **测试**：`__tests__/rooftopBase.test.js` 新增 `findBuildingAt` 的 3 个用例（找不到返回 null、返回高度+置信度、多楼重叠时置信度跟着最高的那栋走）。`__tests__/computeProfile.test.js` 新增一个用例——同一栋 60m 高的楼、同一个观察点 XY，地面观察者算出完全被挡（`frac=0`），站在旁边 65m 高的楼顶算出完全看得见（`frac=1`），手推 `req` 验证两个数字都对得上几何公式。`__tests__/ProfilePanel.test.js` 新增 2 个用例（选择器正确渲染、选了楼层模式后滑杆正确出现）。`npm test`：21 suite / 670 test 全过。`npm run lint` 一开始多了一条新 warning（`viewerLevel` 的 fallback 对象字面量每次渲染都是新引用，会让 effect 依赖数组失效），用 `useMemo` 包一下就干净了。`npm run build` 通过。
+
+---
+
+## 16. 辐射网格加"全地面 / 全楼顶"切换
+
+用户看完单点剖面图的楼层选择器后追问：整片辐射网格能不能也给两个模式——"假设大家都站地面"和"假设大家都能上到脚下那栋楼的楼顶"。这是上一份报告"方向 B"的改良版：方向 B 原本设想网格里落在楼里的格子自动悄悄换成楼顶视角，我当时的顾虑是这样一张图会同时混着两种前提、用户分不清；这次是**两个互斥的整张图模式**，同一时刻只有一种前提贯穿全图，没有"哪些格子在用哪种假设"的困惑，这次直接做了。
+
+**`lib/geo/rooftopBase.js`**：踩了一个坑——把私有的 `pointInRing` 导出、直接给 `computeViewshed.js` 用在已经投影好的局部米制坐标上时，第一次跑测试直接报错 `object is not iterable`。原因是这个函数一直是按 `findBuildingAt`/`findRooftopBase` 的经纬度输入设计的，轮廓点是 `[lng, lat]` **数组**；但 `computeViewshed.js` 内部 `localBuildings` 的轮廓点是投影之后的 `{x, y}` **对象**（`makeLocalProjector.toLocal()` 返回的就是对象，不是数组，是 `lib/viewshed/sightline.js` 一直用的约定）——同一个"环上的一个点"在这个仓库里有两种不同的表示法，计划的时候没注意到这一层，是测试跑出来才发现的。修法是加一个 `toXY()` 小helper，`Array.isArray(point) ? point : [point.x, point.y]`，`pointInRing` 内部统一转一遍，两种输入都认，`findBuildingAt`/`findRooftopBase` 原有调用方式不用改，5+3 个既有测试原样全过。
+
+**`lib/viewshed/computeViewshed.js`**：新增 `tallestBuildingHeightAt(x, y, localBuildings)`（局部坐标版的"这个点在哪栋楼里，取最高的那栋"，跟 `findBuildingAt` 同一个"取最高"判断逻辑，但不需要置信度，返回一个数字）+ 新增可选参数 `observerMode="ground"`（不传行为不变）。循环内部原来四处写死 `EYE_HEIGHT` 的地方（`observer.z`、`heightDiff`、`compositeScore` 的 `eyeHeight`）全部换成逐格算出来的 `cellEyeHeight`——`rooftop` 模式下如果格子中心落在某栋楼轮廓里就是 `楼高+EYE_HEIGHT`，否则还是 `EYE_HEIGHT`。
+
+**`components/launch/LaunchPointControl.jsx`**：面板里加一个 `ToggleButtonGroup`（Ground view / Rooftop view），新状态 `gridObserverMode`，加进网格计算 effect 的依赖数组，`postMessage` 给 worker 时带上 `observerMode`（`lib/viewshed/worker.js` 本身完全不用改，就是透传 `event.data` 给 `computeViewshed`）。**故意没有跟单点剖面图的 `viewerLevel` 联动**——网格模式回答"这片区域如果楼顶都能上人大致什么样"，单点剖面图回答"我选的这一个点具体站第几层看得见吗"，是两个不同的问题，两个控件各管各的。颜色图例文案 rooftop 模式下追加一句"(assumes rooftop access on buildings)"，提醒这张图的前提是什么。
+
+**测试**：`__tests__/computeViewshed.test.js` 新增一个用例——单圈 3 扇区，一栋 65m 楼（`observersBuilding`）正好包住某个扇区的采样点，附近另一栋 60m 楼（`blocker`）挡在这个点和发射点之间；`ground` 模式下手推 `req≈131.38`（k=1.57≥1）→ `frac=0`，`rooftop` 模式下（观察者站在 65m 楼顶，眼高 66.6m，已经比 60m 的挡楼还高）手推 `req≈51.93`（k=-2.40≤-1）→ `frac=1`，两个数值都留有明显余量、不是卡在边界。顺带验证了"观察者站的那栋楼自己不会被误判成挡自己视线的楼"——因为观察点本来就在楼轮廓内部，射线只会穿出边界一次，`intersectSegmentBuilding` 需要两个交点才算数，天然不会把自己算成遮挡物。`npm test`：21 suite / 671 test 全过。`npm run lint`：只有一条已知能接受的 `set-state-in-effect` warning。`npm run build` 通过，并且专门确认了 `lib/viewshed/worker.js` 打包出来的独立 chunk（现在 2.7KB，之前 2.3KB）依然不含任何 React/MUI 代码——新加的点在多边形判断逻辑被正确打进了这个纯算法 chunk，没有意外拉进整个组件树。
+
+---
+
+## 17. 推翻第 16 节的做法——rooftop 改成建筑独立叠层，不再是网格逐格判断
+
+用户看完第 16 节的效果后追问："rooftop 的计算是不是有问题，还是因为扇形面积很难同时表达楼和街道"。分析下来是后者，而且是设计问题不是 bug：极坐标网格的切向宽度随半径线性增长（100m 处约 10.5m，1000m 处约 105m），"是不是站在楼顶"这个判断是二值的（不像遮挡/评分那样连续渐变），一个采样点决定一整个扇形颜色，扇形一旦横跨"半栋楼半条街"就必然有一半是错的。第 16 节那版（网格里判断每个格子是否落在建筑里）在数学上是对的（有单测验证过），但表达方式的锅盖不住——这是用户自己带着一份《可视域计算优化方案.md》来对齐诊断和解法的，方案里"方案 A：建筑独立叠层"的思路被采纳，直接替换掉第 16 节的实现，不是在其基础上修补。
+
+**核心改动**：rooftop 判断从"网格每个格子看是否落在楼里"改成"每栋建筑自己算一次，结果直接填满这栋楼真实的轮廓多边形"——颜色边界=建筑边界，不再需要网格去猜建筑形状。
+
+**回退的部分**：`lib/viewshed/computeViewshed.js` 的 `observerMode`/`cellEyeHeight`/`tallestBuildingHeightAt` 全部删掉，恢复成纯地面网格（每个观察点永远是 `EYE_HEIGHT`）——地面网格现在只回答"站在街上能看见吗"这一件事，rooftop 完全交给新图层。`lib/geo/rooftopBase.js` 里为了给 `computeViewshed.js` 用而临时导出、加了 `[x,y]`/`{x,y}` 双格式兼容的 `pointInRing` 也一并撤回成私有、只认数组格式的原样——这个双格式兼容是上一节专门为了让 `computeViewshed.js` 复用它才加的，既然 `computeViewshed.js` 不再用它，这层兼容性也是死代码，删掉。`__tests__/computeViewshed.test.js` 里对应的 rooftop 用例整个删掉。
+
+**新增 `lib/viewshed/computeRooftopLayer.js`**：`computeRooftopLayer({launch, targetHeight, shellRadius, buildings})`，对传入的每栋建筑（复用跟地面网格同一份、已经按半径裁剪过的 `buildings` 列表，不用再查一次）算质心（环上顶点取平均，不是严格的多边形面积质心——文档里写清楚了这是个简化，遇到凹形建筑质心可能落在轮廓外，先不解决，等真遇到明显算错的建筑再升级），质心 + 建筑高度 + `EYE_HEIGHT` 当观察者，跟地面网格同一套 `computeMinAlt`/`fractionVisible`/`score`/`category` 逻辑算一遍，输出的 `geometry.coordinates` **直接就是这栋建筑自己的 `footprint`**——不用像网格那样反投影回经纬度，`normalizeBuilding()` 出来的 footprint 本来就是 `[lng,lat]` 环的数组，跟 GeoJSON Polygon 的 `coordinates` 格式完全一致，直接原样用。顺带验证了"建筑站在自己质心上不会把自己算成遮挡物"——跟发射点楼顶基座（P1-3）、观察者楼顶剖面图那两处已经验证过的同一个性质：观察点在建筑轮廓内部时，射线只穿出边界一次，`intersectSegmentBuilding` 要两个交点才算数，天然自排除。
+
+**`lib/viewshed/worker.js`**：一次消息里把地面网格和 rooftop 图层都算出来，一起 `postMessage` 回去（`{grid, rooftop}`），不是分两次请求。
+
+**`components/launch/LaunchPointControl.jsx`**：新增第二个 source/layer（`vantage-viewshed-rooftop`/`vantage-viewshed-rooftop-buildings`），跟地面网格一样按 `category` 上色，只是 `fill-outline-color` 换成更亮的白色描边、`fill-opacity` 更高（0.85 vs 0.55），让建筑轮廓在地图上更显眼、跟下面的地面网格区分开。**这次 rooftop 图层和地面网格是一起算出来的，切换 Ground/Rooftop 不再触发重新计算**——原来 `ToggleButtonGroup` 换成一个 `Switch`（"Show rooftop view"），点击只是 `map.setLayoutProperty(ROOFTOP_LAYER_ID, "visibility", ...)` 切显隐，瞬间生效，跟地面网格是否重新算完全无关。图例文案在开着 rooftop 图层时追加一句提示"亮边框是建筑，颜色代表这栋楼自己屋顶能看到什么"。
+
+**测试**：新增 `__tests__/computeRooftopLayer.test.js`，3 个用例——每栋建筑各出一个 feature、geometry 就是原始 footprint；孤立建筑不会自己挡自己（`frac=1`）；旁边一栋 200m 高楼挡住时手推 `req≈452.6`（k=40.26，远超边界）→ `frac=0`，同时验证被挡的那栋楼自己（在挡路楼另一侧、没有东西挡它）读出来是 `frac=1`，两个断言在同一个用例里覆盖了"谁被挡、谁没被挡"。`npm test`：22 suite / 673 test 全过。`npm run lint`：还是那条已知能接受的 warning，没有新增。`npm run build` 通过，`worker.js` 打出来的独立 chunk 长到 3.2KB（原来 2.7KB，涨的是 `computeRooftopLayer` 那部分逻辑），依然不含 React/MUI 代码。
+
+**没做的**：`可视域计算优化方案.md` 里排在"方案 A"后面的"空间索引"、"方案 B 径向扫描"、"方案 C 弧长自适应网格"这次都没做——用户只确认了先做方案 A，其余留着以后再看要不要做。大/异形建筑目前只取一个质心采样点，方案里提到的"大屋顶多点采样、结果不一致时标注部分可见"这次也没做。
