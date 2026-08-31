@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import { Paper, Button, Typography, Slider, Stack, Switch, FormControlLabel } from "@mui/material";
 import { useMapInstance } from "@/lib/MapContext";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
+import { createHiddenBuildingSource } from "@/lib/HiddenBuildingSource";
 import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
 import { filterBuildingsNearPoint } from "@/lib/geo/buildingsNearPoint";
@@ -78,6 +79,7 @@ export default function LaunchPointControl() {
   const observerMarkerRef = useRef(null);
   const placingRef = useRef(placing);
   const workerRef = useRef(null);
+  const hiddenSourceRef = useRef(null);
   // Bumped on every grid request so a response that arrives after a newer
   // request was already sent (rapid caliber drags, mainly) gets ignored
   // instead of overwriting the map with stale data — see the grid effect
@@ -98,6 +100,33 @@ export default function LaunchPointControl() {
     workerRef.current = worker;
     return () => worker.terminate();
   }, []);
+
+  // Buildings for the viewshed math come from a hidden second map (see
+  // lib/HiddenBuildingSource.js), not map.querySourceFeatures() on the
+  // visible one — the visible map only has tiles loaded for whatever's
+  // currently on screen, which silently clipped the rooftop-view overlay to
+  // the loaded-viewport boundary instead of the full ANALYSIS_RADIUS
+  // circle. Created lazily (first use, see getHiddenSource below) since the
+  // visible map's "buildings" source url isn't available until its own
+  // sources have loaded; torn down whenever `map` changes/unmounts.
+  useEffect(() => {
+    return () => {
+      if (hiddenSourceRef.current) {
+        hiddenSourceRef.current.destroy();
+        hiddenSourceRef.current = null;
+      }
+    };
+  }, [map]);
+
+  const getHiddenSource = useCallback(() => {
+    if (!map) return null;
+    if (!hiddenSourceRef.current) {
+      const buildingsSource = map.getStyle().sources?.buildings;
+      if (!buildingsSource?.url) return null;
+      hiddenSourceRef.current = createHiddenBuildingSource(buildingsSource.url);
+    }
+    return hiddenSourceRef.current;
+  }, [map]);
 
   // Register the viewshed source/layer once the style is ready.
   useEffect(() => {
@@ -139,13 +168,18 @@ export default function LaunchPointControl() {
       // Same category-color language as the ground layer, but each feature
       // is a real building footprint rather than a sector wedge — the whole
       // point of computing this per building instead of per grid cell.
+      // fill-extrusion (not fill) so the colored cap actually renders at
+      // roof height rather than painting flat on the ground plane under a
+      // pitched camera — base/height both read buildingHeight (set by
+      // computeRooftopLayer.js), with a 1m gap between them so the cap has
+      // nonzero thickness to shade.
       map.addLayer({
         id: ROOFTOP_LAYER_ID,
-        type: "fill",
+        type: "fill-extrusion",
         source: ROOFTOP_SOURCE_ID,
         layout: { visibility: "none" },
         paint: {
-          "fill-color": [
+          "fill-extrusion-color": [
             "match", ["get", "category"],
             "blocked", "#d32f2f",
             "poor-angle", "#7e57c2",
@@ -153,8 +187,9 @@ export default function LaunchPointControl() {
             "good", "#2e7d32",
             "#9e9e9e",
           ],
-          "fill-opacity": 0.85,
-          "fill-outline-color": "rgba(255,255,255,0.6)",
+          "fill-extrusion-base": ["get", "buildingHeight"],
+          "fill-extrusion-height": ["+", ["get", "buildingHeight"], 1],
+          "fill-extrusion-opacity": 0.85,
         },
       });
     };
@@ -261,64 +296,73 @@ export default function LaunchPointControl() {
     }
 
     const worker = workerRef.current;
-    if (!worker) return;
+    const hiddenSource = getHiddenSource();
+    if (!worker || !hiddenSource) return;
 
-    const queryStart = performance.now();
-    const buildingFeats = map.querySourceFeatures("buildings", { sourceLayer: "building" });
-    const partFeats = map.querySourceFeatures("buildings", { sourceLayer: "building_part" });
-    const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
-    // Nothing farther than the analysis radius from the launch point can
-    // ever sit on a sightline the grid tests — cutting them here shrinks the
-    // O(cells x buildings) cost itself, not just where it runs. Without this
-    // `buildings` was everything querySourceFeatures happened to have
-    // loaded for the current viewport, often thousands of buildings the
-    // occlusion math never needed to look at.
-    const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
-    const queryMs = performance.now() - queryStart;
-
-    // Computed fresh here (not read from the `rooftopBase` state var) so the
-    // request below always uses the value that matches the buildings just
-    // queried — the state update is for display purposes (the caption below)
-    // and only takes effect on the next render.
-    const rooftop = findRooftopBase(launch, buildings);
-    setRooftopBase(rooftop);
-
+    let cancelled = false;
     const requestId = ++requestIdRef.current;
-    const computeStart = performance.now();
-    worker.addEventListener(
-      "message",
-      (e) => {
-        if (requestId !== requestIdRef.current) return; // superseded by a newer request
-        const computeMs = performance.now() - computeStart;
-        const { grid, rooftop: rooftopLayer } = e.data;
-        map.getSource(SOURCE_ID).setData(grid);
-        if (map.getSource(ROOFTOP_SOURCE_ID)) map.getSource(ROOFTOP_SOURCE_ID).setData(rooftopLayer);
-        reportViewshedPerf({
-          queryMs,
-          computeMs,
-          buildingCount: buildings.length,
-          cellCount: grid.features.length,
-          rooftopCount: rooftopLayer.features.length,
-        });
-      },
-      { once: true }
-    );
-    worker.postMessage({
-      launch,
-      targetHeight: caliberHeight + rooftop,
-      shellRadius,
-      analysisRadius: ANALYSIS_RADIUS,
-      radialSpacing: RADIAL_SPACING,
-      angularSpacing: ANGULAR_SPACING,
-      buildings,
+    const queryStart = performance.now();
+
+    hiddenSource.query(launch, ANALYSIS_RADIUS).then(({ buildingFeats, partFeats }) => {
+      if (cancelled || requestId !== requestIdRef.current) return; // superseded by a newer request
+      const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
+      // Nothing farther than the analysis radius from the launch point can
+      // ever sit on a sightline the grid tests — cutting them here shrinks the
+      // O(cells x buildings) cost itself, not just where it runs.
+      const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
+      const queryMs = performance.now() - queryStart;
+
+      // Computed fresh here (not read from the `rooftopBase` state var) so the
+      // request below always uses the value that matches the buildings just
+      // queried — the state update is for display purposes (the caption below)
+      // and only takes effect on the next render.
+      const rooftop = findRooftopBase(launch, buildings);
+      setRooftopBase(rooftop);
+
+      const computeStart = performance.now();
+      worker.addEventListener(
+        "message",
+        (e) => {
+          if (requestId !== requestIdRef.current) return; // superseded by a newer request
+          const computeMs = performance.now() - computeStart;
+          const { grid, rooftop: rooftopLayer } = e.data;
+          map.getSource(SOURCE_ID).setData(grid);
+          if (map.getSource(ROOFTOP_SOURCE_ID)) map.getSource(ROOFTOP_SOURCE_ID).setData(rooftopLayer);
+          reportViewshedPerf({
+            queryMs,
+            computeMs,
+            buildingCount: buildings.length,
+            cellCount: grid.features.length,
+            rooftopCount: rooftopLayer.features.length,
+          });
+        },
+        { once: true }
+      );
+      worker.postMessage({
+        launch,
+        targetHeight: caliberHeight + rooftop,
+        shellRadius,
+        analysisRadius: ANALYSIS_RADIUS,
+        radialSpacing: RADIAL_SPACING,
+        angularSpacing: ANGULAR_SPACING,
+        buildings,
+      });
     });
-  }, [map, launch, caliberHeight, shellRadius]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [map, launch, caliberHeight, shellRadius, getHiddenSource]);
 
   // Full sightline breakdown for whichever point the user picked, published
   // to LaunchContext so ProfilePanel (mounted elsewhere, inside SidePanel)
   // can render it. Re-queries buildings independently rather than sharing
   // the grid effect above — this is a single cheap query, not worth
-  // restructuring the already-working grid effect to share it.
+  // restructuring the already-working grid effect to share it. Same hidden
+  // source as the grid effect (not map.querySourceFeatures directly) so an
+  // observer point near the edge of the current viewport still sees every
+  // occluder within ANALYSIS_RADIUS, not just whatever tiles happen to be
+  // loaded on screen.
   useEffect(() => {
     if (!setAnalysis) return;
     if (!launch) {
@@ -330,37 +374,46 @@ export default function LaunchPointControl() {
       return;
     }
 
-    const buildingFeats = map.querySourceFeatures("buildings", { sourceLayer: "building" });
-    const partFeats = map.querySourceFeatures("buildings", { sourceLayer: "building_part" });
-    const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
-    const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
+    const hiddenSource = getHiddenSource();
+    if (!hiddenSource) return;
 
-    // Mirror of the launch-point rooftop check above, but for the other end
-    // of the sightline — if the observer point sits on a building, standing
-    // at ground level isn't the only option. See lib/geo/rooftopBase.js and
-    // todo.md's "observer on a building" item.
-    const building = findBuildingAt(observer, buildings);
-    const maxFloors = building ? Math.max(1, Math.round(building.height / METERS_PER_FLOOR)) : 0;
-    let observerHeight = EYE_HEIGHT;
-    if (building && viewerLevel.mode === "rooftop") {
-      observerHeight = building.height + EYE_HEIGHT;
-    } else if (building && viewerLevel.mode === "floor") {
-      const floor = Math.min(Math.max(1, viewerLevel.floor), maxFloors);
-      observerHeight = (floor - 1) * METERS_PER_FLOOR + EYE_HEIGHT;
-    }
+    let cancelled = false;
+    hiddenSource.query(launch, ANALYSIS_RADIUS).then(({ buildingFeats, partFeats }) => {
+      if (cancelled) return;
+      const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
+      const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
 
-    const profile = computeSightlineProfile({
-      observer,
-      launch,
-      targetHeight,
-      shellRadius,
-      buildings,
-      observerHeight,
+      // Mirror of the launch-point rooftop check above, but for the other end
+      // of the sightline — if the observer point sits on a building, standing
+      // at ground level isn't the only option. See lib/geo/rooftopBase.js and
+      // todo.md's "observer on a building" item.
+      const building = findBuildingAt(observer, buildings);
+      const maxFloors = building ? Math.max(1, Math.round(building.height / METERS_PER_FLOOR)) : 0;
+      let observerHeight = EYE_HEIGHT;
+      if (building && viewerLevel.mode === "rooftop") {
+        observerHeight = building.height + EYE_HEIGHT;
+      } else if (building && viewerLevel.mode === "floor") {
+        const floor = Math.min(Math.max(1, viewerLevel.floor), maxFloors);
+        observerHeight = (floor - 1) * METERS_PER_FLOOR + EYE_HEIGHT;
+      }
+
+      const profile = computeSightlineProfile({
+        observer,
+        launch,
+        targetHeight,
+        shellRadius,
+        buildings,
+        observerHeight,
+      });
+
+      const observerBuilding = building ? { ...building, maxFloors } : null;
+      setAnalysis({ launch, targetHeight, shellRadius, caliber, observer, observerBuilding, profile });
     });
 
-    const observerBuilding = building ? { ...building, maxFloors } : null;
-    setAnalysis({ launch, targetHeight, shellRadius, caliber, observer, observerBuilding, profile });
-  }, [map, launch, observer, targetHeight, shellRadius, caliber, viewerLevel, setAnalysis]);
+    return () => {
+      cancelled = true;
+    };
+  }, [map, launch, observer, targetHeight, shellRadius, caliber, viewerLevel, setAnalysis, getHiddenSource]);
 
   return (
     <Paper
