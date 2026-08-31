@@ -2,9 +2,9 @@ import { render, screen } from "@testing-library/react";
 import LaunchContext from "@/lib/LaunchContext";
 import ProfilePanel from "@/components/analysis/ProfilePanel";
 
-function renderWithAnalysis(analysis) {
+function renderWithAnalysis(analysis, { viewerLevel, setViewerLevel } = {}) {
   return render(
-    <LaunchContext.Provider value={{ analysis }}>
+    <LaunchContext.Provider value={{ analysis, viewerLevel, setViewerLevel }}>
       <ProfilePanel isDark={false} />
     </LaunchContext.Provider>
   );
@@ -69,12 +69,42 @@ describe("ProfilePanel", () => {
         phi: 44.5379,
         score: 0,
         category: "blocked",
-        hits: [{ distance: 20, height: 30, req: 143.6 }],
+        hits: [{ distance: 20, height: 30, confidence: "low", req: 143.6 }],
       },
     });
     screen.getByText(/Blocked — 0% of the shell/);
     screen.getByText(/Fully blocked — you'd need to reach 144m/);
     screen.getByText(/Overall viewing quality: 0% \(Blocked\)/);
+    screen.getByText("Height is a rough estimate — no direct data for this building.");
+  });
+
+  it("shows the confidence note for whichever building actually drives the verdict", () => {
+    // Two hits — the one with the higher req (the near building) is the
+    // real blocker, so its confidence is what should be shown, not the
+    // farther building's.
+    renderWithAnalysis({
+      launch: { lat: 37.79, lng: -122.4 },
+      targetHeight: 100,
+      shellRadius: 20,
+      observer: { lat: 37.791, lng: -122.401 },
+      profile: {
+        totalDistance: 100,
+        eyeHeight: 1.6,
+        targetHeight: 100,
+        shellRadius: 20,
+        minAlt: 143.6,
+        frac: 0,
+        theta: 16.2265,
+        phi: 44.5379,
+        score: 0,
+        category: "blocked",
+        hits: [
+          { distance: 45, height: 51, confidence: "high", req: 111.38 },
+          { distance: 20, height: 30, confidence: "medium", req: 143.6 },
+        ],
+      },
+    });
+    screen.getByText("Height is estimated from floor count or community-sourced data.");
   });
 
   it("shows the composite score separately from the raw line-of-sight fraction when they diverge", () => {
@@ -129,5 +159,67 @@ describe("ProfilePanel", () => {
     });
     screen.getByText(/Visible — 100% of the shell/);
     screen.getByText(/Overall viewing quality: 1% \(Bad angle\)/);
+  });
+
+  it("shows the viewer-height selector when the observer point sits on a building", () => {
+    renderWithAnalysis(
+      {
+        launch: { lat: 37.79, lng: -122.4 },
+        targetHeight: 100,
+        shellRadius: 20,
+        observer: { lat: 37.791, lng: -122.401 },
+        observerBuilding: { height: 64, confidence: "medium", maxFloors: 20 },
+        profile: {
+          totalDistance: 100,
+          eyeHeight: 1.6,
+          targetHeight: 100,
+          shellRadius: 20,
+          minAlt: -Infinity,
+          frac: 1,
+          theta: 16.2265,
+          phi: 44.5379,
+          score: 1,
+          category: "good",
+          hits: [],
+        },
+      },
+      { viewerLevel: { mode: "ground", floor: 1 }, setViewerLevel: () => {} }
+    );
+    screen.getByText("This spot is on a ~64m building — how high up are you?");
+    screen.getByRole("button", { name: "Ground" });
+    screen.getByRole("button", { name: "Floor" });
+    screen.getByRole("button", { name: "Rooftop" });
+    // Floor mode not selected -> no floor slider yet
+    expect(screen.queryByText(/Floor \d+ of ~20/)).toBeNull();
+    // Building height isn't "high" confidence -> the same trust note as the
+    // blocker confidence line, reused for consistency
+    screen.getByText("Height is estimated from floor count or community-sourced data.");
+  });
+
+  it("shows the floor slider once floor mode is selected", () => {
+    renderWithAnalysis(
+      {
+        launch: { lat: 37.79, lng: -122.4 },
+        targetHeight: 100,
+        shellRadius: 20,
+        observer: { lat: 37.791, lng: -122.401 },
+        observerBuilding: { height: 64, confidence: "high", maxFloors: 20 },
+        profile: {
+          totalDistance: 100,
+          eyeHeight: 10.2,
+          targetHeight: 100,
+          shellRadius: 20,
+          minAlt: -Infinity,
+          frac: 1,
+          theta: 16.2265,
+          phi: 44.5379,
+          score: 1,
+          category: "good",
+          hits: [],
+        },
+      },
+      { viewerLevel: { mode: "floor", floor: 4 }, setViewerLevel: () => {} }
+    );
+    screen.getByText("Floor 4 of ~20");
   });
 });

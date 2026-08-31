@@ -311,3 +311,58 @@
 **测试**：新增 `__tests__/buildingsNearPoint.test.js`，6 个用例（半径内保留、半径+边距外丢弃、卡在边距带内保留、刚过边距丢弃、轮廓跨边界只要有一个顶点在范围内就保留、混合列表正确过滤）。`npm test`：20 suite / 661 test 全过。`npm run lint`：跟之前一样只有一条已知能接受的 `set-state-in-effect` warning，没有新增问题。`npm run build` 通过。
 
 **没做的**：Worker 里现在还是每次收到消息都重新跑一遍完整 `computeViewshed`——没有做"如果建筑没变，复用上一次结果"之类的缓存，也没有真正取消掉过期请求在 Worker 里的计算（只是丢弃它的结果）。`todo.md`"地图页卡顿"一节剩下两条（拦住误选、去掉 mousemove hit-test）都要动 `MapView.jsx` 核心逻辑，这次没有顺手做。
+
+（辐射半径后来又从 500m 改回 1500m——用户想看接上 Worker + 建筑裁剪之后 1500m 的真实体感，效果可以接受，就没再往下调。只改了 `LaunchPointControl.jsx` 里的常量和注释，没有单独立一节。）
+
+---
+
+## 14. M2 收尾——地图误选高亮（配置那一半）+ 高度置信度标注 + 活动书签
+
+问完"下一个 milestone 是什么"，用户从候选里选了三项：修地图误选高亮、补高度置信度标注、补活动书签——数学模型 P1（天气/多点分布）这次不做。这次动手前先写了计划（`ai_reports` 之外，这次直接用会话里的 plan 走的，没有单独存报告文件），跟用户对齐了范围。
+
+### 地图误选高亮——只做了配置那一半
+
+`todo.md` 把"点哪都可能整片飘红"记成一类问题，但拆开看其实是两个独立成因，严重程度和修复代价都不一样：
+
+1. `base` 主题的大面积填充图层（land/water/land-cover/bathymetry）本身就允许被点选——`lib/LayerManager.js` 的 `getInteractiveLayerIds()` 只排除 `metadata["overture:selectable"]===false` 的图层，这些图层的 JSON spec 之前写的是 `true`。点中一块地/一片海会触发 `feature-state:selected`，整片刷半透明红——这是"整片飘红"**唯一**的成因，跟 VANTAGE 有没有在放发射点完全无关，原生 explore 模式点一下海也会这样。
+2. VANTAGE 自己的点击监听器和 `MapView.jsx` 既有的要素选取逻辑并行跑，点在建筑上会让侧栏意外弹出——这个是 Phase 3/4 就记录过的"刻意接受的小瑕疵"，这次没动。
+
+只做了第 1 条：把 `land`/`water`（ocean、lake-river、lake-river-intermittent）/`land-cover`（wetland/forest/grass/mangrove/moss/shrub/snow/barren/crop 共 9 个）这 13 个大面积填充图层的 `overture:selectable` 从 `true` 改成 `false`。**核对时发现 `bathymetry` 的 8 个深度带图层已经是 `false` 了**——不知道是谁、什么时候顺手改的，不在这次改动范围内，直接跳过。`land-use`（park/cemetery/college/medical/military/recreation）、`infrastructure`（pier/aerialway/airport）、水系的 `line`/`label`（不是大面积填充）全部没动——这些是用户可能真的想点开看的具体地块/线状要素，`todo.md` 原文点名的也只是"land/water/land_cover"。第 2 条要动 `MapView.jsx` 既有点击处理器本身，是目前为止唯一一处会突破"只加独立 effect、不碰核心逻辑"这个原则的地方，留着单独做。
+
+**测试**：新增 `__tests__/selectableLayers.test.js`，直接用真实的 `defaultLayerSpecs`（`components/map/index.js` 里已经把 `id` 注入好了，格式就是运行时 `map.getStyle().layers` 的样子）+ 一个只实现了 `getStyle()` 的假 `map` 对象跑 `getInteractiveLayerIds()`，断言这 13＋8 个大面积图层不在可选中列表里，同时断言 `land-use`/`buildings` 这些还能正常选中——防止以后被误改回 `true`。
+
+### 高度置信度标注
+
+`lib/geo/normalizeBuilding.js` 早就算出 `confidence`（high/medium/low）,但 `lib/viewshed/computeProfile.js` 把 `buildings` 投影成 `localBuildings` 时只留了 `{height, footprint}`，这个字段在这一步就被悄悄丢了，`hits[]` 里从来没出现过，`ProfilePanel.jsx` 也没地方读——补上：`localBuildings` 映射和 `hits.push()` 都带上 `confidence`。
+
+`ProfilePanel.jsx` 只在真的有遮挡建筑时（`hits.length>0`）显示一行说明，读的是产生 `minAlt` 那栋楼（即 `req` 最大的那个，跟 `SightlineChart` 判断 `isBlocker` 用的同一条逻辑）的置信度，配一张 `CONFIDENCE_LABEL` 三档文案表。文案故意不写成"我们不确定"这种纯粹的免责声明口气——high/medium/low 各自说清楚"这个数字是哪来的"（直接数据 / 楼层数或社区数据估算 / 没有直接数据的粗略估计），PRD 原话是"信任积累项，不是负分项"，文案要对得上这个定位。`SightlineChart` 里每根柱子的 `<title>` hover 也顺手带上了置信度。
+
+### 活动书签（`BookmarkDial.jsx`）
+
+原来的 4 个书签（Paris/NYC/London/Boston）是通用城市取景点，换成 4 个真实、常年举办的知名烟花活动的取景点（沿用原来"4 个书签、扇形展开"的 UI，不改布局逻辑）：Bastille Day（埃菲尔铁塔，发射点本身）、Macy's July 4th（东河沿岸，看曼哈顿天际线的角度）、London NYE（伦敦眼、泰晤士河畔）、Boston Pops July 4th（查尔斯河 Esplanade/Hatch Shell，原坐标本来就很接近，微调）。标签加了 🎆 前缀，跟这次会话里其它 emoji 图例（🔴🟣🟡🟢、🧍）统一视觉语言。这几个是"挑个好看角度"性质的取景框架，不是测绘级精确数据——跟原来那 4 个城市书签的性质完全一样。
+
+**顺带修的一个位置冲突**：`BookmarkDial` 原来跟 `LaunchPointControl` 的悬浮面板锚在同一个位置（都是 `bottom:24, left:'50%'`），设了发射点之后 `LaunchPointControl` 面板（z-index 更高）会整个盖住书签的 Fab 按钮，根本点不到。这次挪到左下角（`bottom:24, left:24`），避开 `LaunchPointControl`（底部居中）和 `PerfOverlay`（右下角，仅开发环境）。扇形展开角度从原来围绕正上方的 155°→25° 收窄成 100°→25°（偏向右上），因为锚点从屏幕底部居中挪到左下角后，原来的角度范围会把最左边的书签推到屏幕外面去。
+
+**验证**：`npm test`：21 suite / 664 test 全过（新增 `selectableLayers.test.js` 2 个用例，`computeProfile.test.js`/`ProfilePanel.test.js` 各加了置信度相关的用例）。`npm run lint`、`npm run build` 都过，`build` 顺带验证了这次改的 13 个图层 JSON 语法没写错（不然 `schemaValidation.test.js`/`styleValidation.test.js` 或 build 本身会先炸）。`BookmarkDial.jsx` 本身跟 `LaunchPointControl.jsx` 一样没有单独的组件测试（依赖真实 map 实例，这是既有的测试策略边界，不是这次漏做）。
+
+---
+
+## 15. 观察者站在楼上——P1-3 的镜像 bug
+
+用户自己想到的问题，不是数学文档带来的：如果把观察点选在一栋高楼上（比如订了楼顶酒吧看烟花），算法是不是还是按地面算？核对下来确实是——`EYE_HEIGHT=1.6` 在 `computeViewshed.js`/`computeProfile.js` 里都是写死的绝对高度，完全不知道观察点是不是落在建筑轮廓里。这正是 P1-3（发射点站楼顶）的镜像版本，只是这次是视线的另一端，而且现实里更常踩到——很多人是特意上楼顶找视野的。
+
+先写了报告（这次直接在会话里的 plan 走的），把问题拆成"单点剖面图"和"整片辐射网格"两种场景分开看：网格要不要自动假设"每栋楼的楼顶都能站人"是个更大的产品判断，这次没做；单点剖面图（用户主动点了这一个点问"我站这儿看得见吗"）适合让用户自己说清楚站在哪一层，这次只做这个。用户确认：范围就做单点，高度选择器给"地面/楼层/楼顶"三档就够，不需要直接输入米数。
+
+**`lib/geo/rooftopBase.js` 加了 `findBuildingAt`**：跟已有的 `findRooftopBase`（P1-3 用，只返回高度数字）平级，多返回一个 `confidence`——因为这次不只要知道"这栋楼多高"，还要在置信度低的时候提醒用户"你选的第 8 层这个数字本身就不太准"。`findRooftopBase` 顺手改成基于 `findBuildingAt` 实现（`?.height ?? 0`），避免点在多边形内的判断逻辑两处重复，行为完全不变，原有 5 个测试不改也全过。
+
+**`lib/geo/normalizeBuilding.js` 的 `METERS_PER_FLOOR`（3.2m/层）导出了**——供 `LaunchPointControl.jsx` 把"第几层"换算回米数用，不再各处各猜一个系数。
+
+**`lib/viewshed/computeProfile.js`**：`computeSightlineProfile()` 加一个可选参数 `observerHeight`（默认还是 `EYE_HEIGHT`，不传行为完全不变），观察者的 z 坐标、`heightDiff`（进而 `theta`/`phi`/复合评分）、返回的 `eyeHeight` 字段全部从写死的 `EYE_HEIGHT` 换成这个参数——之前 `eyeHeight` 返回值其实一直是常量本身而不是"实际用的观察高度"，这次顺带修正。剖面图的 SVG 图表（`SightlineChart`）完全不用改代码就能正确画出"你"站在高处的样子，因为它本来就是拿 `profile.eyeHeight` 算纵轴位置的——只是加了一根"你站的这栋楼"的柱子（`eyeHeight` 明显高于地面时才画），不然人会看起来悬空。
+
+**`lib/LaunchContext.js`/`LaunchProvider.jsx`**：新增 `viewerLevel`（`{mode: "ground"|"floor"|"rooftop", floor}`）+ `setViewerLevel`，跟 `analysis` 平级放在同一个 context 里——`LaunchPointControl.jsx`（生产者，算出发射点/观察点分析结果的地方）读它来决定喂给 `computeSightlineProfile` 的 `observerHeight`，`ProfilePanel.jsx`（消费者）读它来渲染选择器、写它来响应用户点选。选了新的观察点时会把 `viewerLevel` 重置回"地面"——上一个点选的"楼顶"不该原样带到下一个可能完全不在楼里的新点上。
+
+**`LaunchPointControl.jsx` 的剖面计算 effect**：复用已经查好的 `buildings`，跑一次 `findBuildingAt(observer, buildings)` 判断观察点是否在楼里，算出 `maxFloors`（`Math.round(楼高/3.2)`），根据 `viewerLevel.mode` 算出实际 `observerHeight`（地面=1.6m 不变；楼层=`(第几层-1)×3.2+1.6`；楼顶=`楼高+1.6`），连同 `observerBuilding`（含高度/置信度/楼层数，给面板渲染用）一并放进 `setAnalysis`。
+
+**`ProfilePanel.jsx`**：`analysis.observerBuilding` 存在时，在剖面结果之前显示一个 `ToggleButtonGroup`（地面/楼层/楼顶）+ 选了楼层时出现的 `Slider`，选完直接触发 `LaunchPointControl.jsx` 重新算。楼高置信度不是 high 时复用第 14 节的 `CONFIDENCE_LABEL` 文案，跟高度置信度标注那套视觉语言保持一致，不另起一套。
+
+**测试**：`__tests__/rooftopBase.test.js` 新增 `findBuildingAt` 的 3 个用例（找不到返回 null、返回高度+置信度、多楼重叠时置信度跟着最高的那栋走）。`__tests__/computeProfile.test.js` 新增一个用例——同一栋 60m 高的楼、同一个观察点 XY，地面观察者算出完全被挡（`frac=0`），站在旁边 65m 高的楼顶算出完全看得见（`frac=1`），手推 `req` 验证两个数字都对得上几何公式。`__tests__/ProfilePanel.test.js` 新增 2 个用例（选择器正确渲染、选了楼层模式后滑杆正确出现）。`npm test`：21 suite / 670 test 全过。`npm run lint` 一开始多了一条新 warning（`viewerLevel` 的 fallback 对象字面量每次渲染都是新引用，会让 effect 依赖数组失效），用 `useMemo` 包一下就干净了。`npm run build` 通过。

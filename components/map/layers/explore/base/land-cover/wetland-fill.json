@@ -7,7 +7,7 @@
     "overture:theme": "base",
     "overture:type": "land_cover",
     "overture:group": "base-land-cover",
-    "overture:selectable": true,
+    "overture:selectable": false,
     "overture:item": "wetland"
   },
   "filter": [

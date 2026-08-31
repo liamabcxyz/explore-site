@@ -11,9 +11,10 @@ const toLngLat = (x, y) => [x / METERS_PER_DEGREE, y / METERS_PER_DEGREE];
 // __tests__/sightline.test.js.
 const observer = { lat: 0, lng: 100 / METERS_PER_DEGREE };
 
-function squareBuilding(xMin, xMax, height) {
+function squareBuilding(xMin, xMax, height, confidence = "high") {
   return {
     height,
+    confidence,
     footprint: [[
       toLngLat(xMin, -10),
       toLngLat(xMax, -10),
@@ -67,7 +68,7 @@ describe("computeSightlineProfile", () => {
     // eye(1.6) -> target(100) over 100m; building spans x in [45,55], so the
     // near face (from the observer at x=100 moving toward x=0) is x=55,
     // tEntry = (100-55)/100 = 0.45 -> distance 45m from the observer.
-    const building = squareBuilding(45, 55, 51);
+    const building = squareBuilding(45, 55, 51, "medium");
     const result = computeSightlineProfile({
       observer,
       launch,
@@ -79,6 +80,7 @@ describe("computeSightlineProfile", () => {
     expect(result.hits).toHaveLength(1);
     expect(result.hits[0].distance).toBeCloseTo(45);
     expect(result.hits[0].height).toBe(51);
+    expect(result.hits[0].confidence).toBe("medium");
     // req = eyeHeight + (height - eyeHeight) / tEntry = 1.6 + 49.4 / 0.45
     const expectedReq = 1.6 + 49.4 / 0.45;
     expect(result.hits[0].req).toBeCloseTo(expectedReq);
@@ -112,5 +114,37 @@ describe("computeSightlineProfile", () => {
     const k = (nearReq - 100) / 100;
     const expectedFrac = (Math.acos(k) - k * Math.sqrt(1 - k * k)) / Math.PI;
     expect(result.frac).toBeCloseTo(expectedFrac);
+  });
+
+  it("clears a building from an elevated observer that would fully block it at ground level", () => {
+    // Same building (60m, spanning x in [45,55]) and the same observer XY —
+    // only observerHeight changes, e.g. ground floor vs. standing on a
+    // neighboring 65m rooftop. This is the "observer on a building" case:
+    // computeSightlineProfile shouldn't silently assume ground level.
+    const building = squareBuilding(45, 55, 60);
+
+    const groundLevel = computeSightlineProfile({
+      observer,
+      launch,
+      targetHeight: 100,
+      shellRadius: 20,
+      buildings: [building],
+      // observerHeight omitted -> defaults to EYE_HEIGHT (ground)
+    });
+    // req = 1.6 + 58.4/0.45 = 131.38, past H+R=120 -> fully blocked
+    expect(groundLevel.frac).toBe(0);
+    expect(groundLevel.eyeHeight).toBeCloseTo(1.6);
+
+    const elevated = computeSightlineProfile({
+      observer,
+      launch,
+      targetHeight: 100,
+      shellRadius: 20,
+      buildings: [building],
+      observerHeight: 65,
+    });
+    // req = 65 + (60-65)/0.45 = 53.89, well below H-R=80 -> fully clear
+    expect(elevated.frac).toBe(1);
+    expect(elevated.eyeHeight).toBe(65);
   });
 });

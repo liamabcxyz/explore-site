@@ -52,7 +52,7 @@
     "overture:theme": "base",
     "overture:type": "land",
     "overture:group": "base-land",
-    "overture:selectable": true,
+    "overture:selectable": false,
     "overture:item": "land"
   }
 }

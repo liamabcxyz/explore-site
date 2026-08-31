@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import { Paper, Button, Typography, Slider, Stack } from "@mui/material";
 import { useMapInstance } from "@/lib/MapContext";
@@ -8,8 +8,10 @@ import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
 import { filterBuildingsNearPoint } from "@/lib/geo/buildingsNearPoint";
-import { findRooftopBase } from "@/lib/geo/rooftopBase";
+import { findRooftopBase, findBuildingAt } from "@/lib/geo/rooftopBase";
+import { METERS_PER_FLOOR } from "@/lib/geo/normalizeBuilding";
 import { reportViewshedPerf } from "@/lib/perf";
+import { EYE_HEIGHT } from "@/lib/viewshed/scoring";
 import { computeSightlineProfile } from "@/lib/viewshed/computeProfile";
 import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
 
@@ -28,7 +30,17 @@ const LAYER_ID = "vantage-viewshed-sectors";
 
 export default function LaunchPointControl() {
   const map = useMapInstance();
-  const setAnalysis = useLaunchAnalysis()?.setAnalysis;
+  const launchAnalysis = useLaunchAnalysis();
+  const setAnalysis = launchAnalysis?.setAnalysis;
+  // Memoized so the fallback object (only used if this ever renders outside
+  // a LaunchProvider) doesn't change identity every render and thrash the
+  // profile effect's dependency array below.
+  const contextViewerLevel = launchAnalysis?.viewerLevel;
+  const viewerLevel = useMemo(
+    () => contextViewerLevel ?? { mode: "ground", floor: 1 },
+    [contextViewerLevel]
+  );
+  const setViewerLevel = launchAnalysis?.setViewerLevel;
   const [placing, setPlacing] = useState(false);
   const [launch, setLaunch] = useState(null);
   // Caliber drives both burst height and shell radius (烟花可视性数学模型.md
@@ -139,10 +151,13 @@ export default function LaunchPointControl() {
       const { x, y } = projector.toLocal(e.lngLat.lat, e.lngLat.lng);
       if (Math.hypot(x, y) > ANALYSIS_RADIUS) return;
       setObserver({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      // A fresh point may not even be on a building — start over rather than
+      // carrying e.g. "rooftop" from whatever the last point was.
+      if (setViewerLevel) setViewerLevel({ mode: "ground", floor: 1 });
     };
     map.on("click", onClick);
     return () => map.off("click", onClick);
-  }, [map, launch]);
+  }, [map, launch, setViewerLevel]);
 
   useEffect(() => {
     if (!map) return;
@@ -250,7 +265,7 @@ export default function LaunchPointControl() {
       return;
     }
     if (!map || !observer) {
-      setAnalysis({ launch, targetHeight, shellRadius, caliber, observer: null, profile: null });
+      setAnalysis({ launch, targetHeight, shellRadius, caliber, observer: null, observerBuilding: null, profile: null });
       return;
     }
 
@@ -259,16 +274,32 @@ export default function LaunchPointControl() {
     const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
     const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
 
+    // Mirror of the launch-point rooftop check above, but for the other end
+    // of the sightline — if the observer point sits on a building, standing
+    // at ground level isn't the only option. See lib/geo/rooftopBase.js and
+    // todo.md's "observer on a building" item.
+    const building = findBuildingAt(observer, buildings);
+    const maxFloors = building ? Math.max(1, Math.round(building.height / METERS_PER_FLOOR)) : 0;
+    let observerHeight = EYE_HEIGHT;
+    if (building && viewerLevel.mode === "rooftop") {
+      observerHeight = building.height + EYE_HEIGHT;
+    } else if (building && viewerLevel.mode === "floor") {
+      const floor = Math.min(Math.max(1, viewerLevel.floor), maxFloors);
+      observerHeight = (floor - 1) * METERS_PER_FLOOR + EYE_HEIGHT;
+    }
+
     const profile = computeSightlineProfile({
       observer,
       launch,
       targetHeight,
       shellRadius,
       buildings,
+      observerHeight,
     });
 
-    setAnalysis({ launch, targetHeight, shellRadius, caliber, observer, profile });
-  }, [map, launch, observer, targetHeight, shellRadius, caliber, setAnalysis]);
+    const observerBuilding = building ? { ...building, maxFloors } : null;
+    setAnalysis({ launch, targetHeight, shellRadius, caliber, observer, observerBuilding, profile });
+  }, [map, launch, observer, targetHeight, shellRadius, caliber, viewerLevel, setAnalysis]);
 
   return (
     <Paper

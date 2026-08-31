@@ -4,40 +4,48 @@ import { Fab, Chip } from '@mui/material';
 import StarIcon from '@mui/icons-material/Star';
 import { useMapInstance } from '@/lib/MapContext';
 
+// Known, recurring fireworks displays rather than generic city bookmarks —
+// same jump-to-camera mechanism as before, just retargeted to the actual
+// launch/viewing spot for each show instead of a city's downtown. Framing is
+// a "nice angle to look from," not surveyed venue data — same spirit as the
+// city bookmarks these replace.
 const BOOKMARKS = [
   {
-    name: 'Paris',
-    center: [2.3417, 48.8552],
-    zoom: 11.73,
-    pitch: 12,
-    bearing: 15.3,
+    name: '🎆 Bastille Day (Paris)',
+    center: [2.2945, 48.8584], // Eiffel Tower — the launch point itself
+    zoom: 15.5,
+    pitch: 55,
+    bearing: -20,
   },
   {
-    name: 'NYC',
-    center: [-73.99768, 40.75332],
-    zoom: 14.22,
+    name: "🎆 Macy's July 4th (NYC)",
+    center: [-73.966, 40.7527], // East River, facing the Midtown skyline
+    zoom: 13.5,
     pitch: 60,
-    bearing: 60.6,
+    bearing: 60,
   },
   {
-    name: 'London',
-    center: [-0.091217, 51.514511],
-    zoom: 16.02,
-    pitch: 50,
+    name: '🎆 NYE Fireworks (London)',
+    center: [-0.1195, 51.5033], // The London Eye, on the Thames
+    zoom: 15.5,
+    pitch: 55,
     bearing: -24,
   },
   {
-    name: 'Boston',
-    center: [-71.065192, 42.353714],
-    zoom: 15.94,
+    name: '🎆 Boston Pops July 4th',
+    center: [-71.0729, 42.3554], // Charles River Esplanade / Hatch Shell
+    zoom: 15.5,
     pitch: 52,
     bearing: 0,
   },
 ];
 
-// Spread 5 items in an arc above the button (160° to 20°, left to right)
+// Spread 4 items in an arc above-right of the button — anchored bottom-left
+// now (see the root div below), so the fan opens up and to the right rather
+// than the old bottom-center layout's full semicircle, which would push the
+// leftmost chips off the edge of the screen from this corner.
 const RADIUS = 90;
-const ANGLES = [155, 115, 65, 25];
+const ANGLES = [100, 75, 50, 25];
 
 function getArcPosition(angleDeg) {
   const rad = (angleDeg * Math.PI) / 180;
@@ -64,7 +72,7 @@ export default function BookmarkDial({ mode }) {
   };
 
   return (
-    <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 1000 }}>
+    <div style={{ position: 'fixed', bottom: 24, left: 24, zIndex: 1000 }}>
       {BOOKMARKS.map((bookmark, i) => {
         const pos = getArcPosition(ANGLES[i]);
         return (

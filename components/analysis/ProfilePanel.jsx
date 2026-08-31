@@ -1,6 +1,7 @@
 import PropTypes from "prop-types";
-import { Box, Typography, Stack } from "@mui/material";
+import { Box, Typography, Stack, ToggleButton, ToggleButtonGroup, Slider } from "@mui/material";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
+import { EYE_HEIGHT } from "@/lib/viewshed/scoring";
 
 // Same red/yellow/green the map's own viewshed grid dots use (see the
 // circle-color paint expression in components/launch/LaunchPointControl.jsx)
@@ -44,6 +45,16 @@ const CATEGORY_LABEL = {
   good: "Good spot",
 };
 
+// lib/geo/normalizeBuilding.js's HEIGHT_SOURCE_CONFIDENCE tiers, spelled out
+// for the user — this is meant to build trust, not read as a caveat, so it
+// says what IS known rather than just hedging ("estimated" alone reads as
+// "we don't know," when medium/low actually do have a documented basis).
+const CONFIDENCE_LABEL = {
+  high: "Height is directly reported for this building.",
+  medium: "Height is estimated from floor count or community-sourced data.",
+  low: "Height is a rough estimate — no direct data for this building.",
+};
+
 const WIDTH = 280;
 const HEIGHT = 170;
 const PAD_LEFT = 34;
@@ -77,6 +88,20 @@ function SightlineChart({ profile, isDark }) {
       {/* ground */}
       <line x1={PAD_LEFT} y1={groundY} x2={WIDTH - PAD_RIGHT} y2={groundY} stroke={baseline} strokeWidth={1} />
 
+      {/* the building the observer is standing on, if eyeHeight is elevated
+          above just standing at ground level — otherwise "you" would read as
+          floating in midair with nothing under it */}
+      {eyeHeight > EYE_HEIGHT + 0.5 && (
+        <rect
+          x={xAt(0) - Math.max(4, PLOT_WIDTH * 0.03) / 2}
+          y={yAt(eyeHeight)}
+          width={Math.max(4, PLOT_WIDTH * 0.03)}
+          height={groundY - yAt(eyeHeight)}
+          fill={nonBlockingFill}
+          opacity={0.4}
+        />
+      )}
+
       {/* buildings */}
       {hits.map((hit, i) => {
         const isBlocker = hit.req === blockerReq;
@@ -92,7 +117,7 @@ function SightlineChart({ profile, isDark }) {
             fill={isBlocker ? blockColor : nonBlockingFill}
             opacity={isBlocker ? 0.9 : 0.6}
           >
-            <title>{`${Math.round(hit.height)}m building, ${Math.round(hit.distance)}m from you`}</title>
+            <title>{`${Math.round(hit.height)}m building (${hit.confidence} confidence), ${Math.round(hit.distance)}m from you`}</title>
           </rect>
         );
       })}
@@ -133,7 +158,7 @@ SightlineChart.propTypes = {
 };
 
 export default function ProfilePanel({ isDark }) {
-  const { analysis } = useLaunchAnalysis() ?? {};
+  const { analysis, viewerLevel, setViewerLevel } = useLaunchAnalysis() ?? {};
   const mutedColor = "rgba(0,0,0,0.4)";
   const promptSx = {
     p: 2,
@@ -151,13 +176,61 @@ export default function ProfilePanel({ isDark }) {
     return <Box sx={promptSx}>Click anywhere on the map to see whether that spot can see the launch.</Box>;
   }
 
-  const { profile } = analysis;
-  const { minAlt, frac } = profile;
+  const { profile, observerBuilding } = analysis;
+  const { minAlt, frac, hits } = profile;
   const color = verdictColor(frac);
   const label = verdictLabel(frac);
+  // The building that actually drives the verdict — same "max req" logic
+  // SightlineChart uses to pick isBlocker — is the one whose height accuracy
+  // matters to how much the user should trust this result.
+  const blocker = hits.length > 0
+    ? hits.reduce((tallest, h) => (h.req >= tallest.req ? h : tallest), hits[0])
+    : null;
+  const level = viewerLevel ?? { mode: "ground", floor: 1 };
 
   return (
     <Box sx={{ p: 2 }}>
+      {/* Mirror of the launch point's rooftop handling (todo.md P1-3), but
+          for the observer's end of the sightline — a clicked point that sits
+          on a building isn't necessarily viewed from ground level, and the
+          algorithm has no way to guess which floor without being told. */}
+      {observerBuilding && setViewerLevel && (
+        <Box sx={{ mb: 1.5 }}>
+          <Typography variant="caption" component="p" sx={{ mb: 0.5 }}>
+            This spot is on a ~{Math.round(observerBuilding.height)}m building — how high up are you?
+          </Typography>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={level.mode}
+            onChange={(_, mode) => mode && setViewerLevel({ ...level, mode })}
+          >
+            <ToggleButton value="ground">Ground</ToggleButton>
+            <ToggleButton value="floor">Floor</ToggleButton>
+            <ToggleButton value="rooftop">Rooftop</ToggleButton>
+          </ToggleButtonGroup>
+          {level.mode === "floor" && (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="caption">
+                Floor {Math.min(Math.max(1, level.floor), observerBuilding.maxFloors)} of ~{observerBuilding.maxFloors}
+              </Typography>
+              <Slider
+                size="small"
+                min={1}
+                max={observerBuilding.maxFloors}
+                value={Math.min(Math.max(1, level.floor), observerBuilding.maxFloors)}
+                onChangeCommitted={(_, floor) => setViewerLevel({ ...level, floor })}
+              />
+            </Box>
+          )}
+          {observerBuilding.confidence !== "high" && (
+            <Typography variant="caption" component="p" sx={{ color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)" }}>
+              {CONFIDENCE_LABEL[observerBuilding.confidence]}
+            </Typography>
+          )}
+        </Box>
+      )}
+
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
         <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: color, flexShrink: 0 }} />
         <Typography variant="subtitle2" sx={{ fontFamily: "Montserrat, sans-serif" }}>
@@ -173,6 +246,12 @@ export default function ProfilePanel({ isDark }) {
             : `Partially blocked — reaching ${Math.round(minAlt)}m would clear it entirely.`}
         {" "}{Math.round(profile.totalDistance)}m from the launch point.
       </Typography>
+
+      {blocker && (
+        <Typography variant="caption" component="p" sx={{ mb: 1.5, color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)" }}>
+          {CONFIDENCE_LABEL[blocker.confidence]}
+        </Typography>
+      )}
 
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
         <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: CATEGORY_COLOR[profile.category], flexShrink: 0 }} />

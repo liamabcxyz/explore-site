@@ -1,8 +1,9 @@
-import { findRooftopBase } from "@/lib/geo/rooftopBase";
+import { findRooftopBase, findBuildingAt } from "@/lib/geo/rooftopBase";
 
-function squareBuilding(lngMin, lngMax, latMin, latMax, height) {
+function squareBuilding(lngMin, lngMax, latMin, latMax, height, confidence = "high") {
   return {
     height,
+    confidence,
     footprint: [[
       [lngMin, latMin], [lngMax, latMin], [lngMax, latMax], [lngMin, latMax], [lngMin, latMin],
     ]],
@@ -37,5 +38,24 @@ describe("findRooftopBase", () => {
   it("ignores a building whose footprint the point sits just outside of", () => {
     const building = squareBuilding(0, 10, 0, 10, 50);
     expect(findRooftopBase({ lat: 5, lng: 10.001 }, [building])).toBe(0);
+  });
+});
+
+describe("findBuildingAt", () => {
+  it("returns null when the point isn't on any building", () => {
+    const building = squareBuilding(0, 10, 0, 10, 50);
+    expect(findBuildingAt({ lat: 20, lng: 20 }, [building])).toBeNull();
+  });
+
+  it("returns the height and confidence of the building the point falls inside", () => {
+    const building = squareBuilding(0, 10, 0, 10, 50, "medium");
+    expect(findBuildingAt({ lat: 5, lng: 5 }, [building])).toEqual({ height: 50, confidence: "medium" });
+  });
+
+  it("picks the tallest match's confidence too, same tie-break as findRooftopBase", () => {
+    const podium = squareBuilding(0, 20, 0, 20, 15, "high");
+    const tower = squareBuilding(5, 15, 5, 15, 80, "low");
+    const point = { lat: 10, lng: 10 };
+    expect(findBuildingAt(point, [podium, tower])).toEqual({ height: 80, confidence: "low" });
   });
 });
