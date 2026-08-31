@@ -572,6 +572,14 @@ export default function LaunchPointControl() {
         )}
         {launch && (
           <>
+            {/* Post-placement hint. ProfilePanel (mounted inside SidePanel)
+                is fully wired to render for any observer point, but nothing
+                else in the map UI signals that clicking a spot opens it —
+                users would have to accidentally discover it. Same shape as
+                the empty-state hint above. */}
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              Click any spot in the circle to check what&apos;s visible from there.
+            </Typography>
             <Typography variant="caption">
               Caliber: {caliber}&quot; · burst ~{Math.round(targetHeight)}m
               {rooftopBase > 0 && ` (incl. ${Math.round(rooftopBase)}m rooftop)`}
