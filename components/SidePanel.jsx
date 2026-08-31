@@ -7,6 +7,14 @@ import ProfilePanel from "@/components/analysis/ProfilePanel";
 
 const DRAWER_WIDTH = 340;
 
+// The Explore / Inspect / Features tab set is Overture Explorer's own
+// layer-editor UI — VANTAGE only uses the Features tab (ProfilePanel).
+// Off by default; flip to true if a future debugging need brings back
+// the raw layer-tree editor. Same pattern the compare-slider disable
+// (components/MapView.jsx) uses, for the same reason: keep the code
+// intact so it's cheap to bring back.
+const ENABLE_LAYER_TABS = false;
+
 export default function SidePanel({
   mode,
   drawerOpen,
@@ -32,7 +40,7 @@ export default function SidePanel({
       {/* Toggle button — visible when drawer is closed */}
       {!drawerOpen && (
         <IconButton
-          aria-label="Open layers panel"
+          aria-label="Open details panel"
           onClick={() => setDrawerOpen(true)}
           sx={{
             position: "fixed",
@@ -83,7 +91,7 @@ export default function SidePanel({
           }}
         >
           <IconButton
-            aria-label="Close layers panel"
+            aria-label="Close details panel"
             onClick={() => setDrawerOpen(false)}
             sx={{ color: isDark ? "white" : "#333" }}
           >
@@ -91,39 +99,43 @@ export default function SidePanel({
           </IconButton>
         </Box>
 
-        {/* Tabs */}
-        <Tabs
-          value={activeTab}
-          onChange={(_, v) => setActiveTab(v)}
-          variant="fullWidth"
-          sx={{
-            minHeight: 36,
-            borderBottom: 1,
-            borderColor: "divider",
-            "& .MuiTabs-indicator": {
-              backgroundColor: isDark ? "#fff" : "#000",
-            },
-            "& .MuiTab-root": {
+        {ENABLE_LAYER_TABS && (
+          <Tabs
+            value={activeTab}
+            onChange={(_, v) => setActiveTab(v)}
+            variant="fullWidth"
+            sx={{
               minHeight: 36,
-              textTransform: "none",
-              fontFamily: "Montserrat, sans-serif",
-              fontSize: 13,
-              fontWeight: 500,
-              color: isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.6)",
-              "&.Mui-selected": {
-                color: isDark ? "#fff" : "#000",
+              borderBottom: 1,
+              borderColor: "divider",
+              "& .MuiTabs-indicator": {
+                backgroundColor: isDark ? "#fff" : "#000",
               },
-            },
-          }}
-        >
-          <Tab label="Explore" value="layers" />
-          <Tab label="Inspect" value="inspect" />
-          <Tab label="Features" value="features" />
-        </Tabs>
+              "& .MuiTab-root": {
+                minHeight: 36,
+                textTransform: "none",
+                fontFamily: "Montserrat, sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                color: isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.6)",
+                "&.Mui-selected": {
+                  color: isDark ? "#fff" : "#000",
+                },
+              },
+            }}
+          >
+            <Tab label="Explore" value="layers" />
+            <Tab label="Inspect" value="inspect" />
+            <Tab label="Features" value="features" />
+          </Tabs>
+        )}
 
-        {/* Tab content */}
+        {/* Tab content — with ENABLE_LAYER_TABS off, VANTAGE only ever
+            wants the ProfilePanel view, so skip the activeTab dispatch
+            entirely and render it directly. */}
         <Box sx={{ overflow: "auto", flex: 1 }}>
-          {activeTab === "layers" && (
+          {!ENABLE_LAYER_TABS && <ProfilePanel isDark={isDark} />}
+          {ENABLE_LAYER_TABS && activeTab === "layers" && (
             <LayerTree
               visibleTypes={visibleTypes}
               setVisibleTypes={setVisibleTypes}
@@ -131,7 +143,7 @@ export default function SidePanel({
               zoom={zoom}
             />
           )}
-          {activeTab === "inspect" && (
+          {ENABLE_LAYER_TABS && activeTab === "inspect" && (
             <LayerTree
               inspect
               visibleTypes={inspectVisibleTypes}
@@ -140,7 +152,7 @@ export default function SidePanel({
               zoom={zoom}
             />
           )}
-          {activeTab === "features" && <ProfilePanel isDark={isDark} />}
+          {ENABLE_LAYER_TABS && activeTab === "features" && <ProfilePanel isDark={isDark} />}
         </Box>
       </Drawer>
     </>

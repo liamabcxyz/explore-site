@@ -1,27 +1,24 @@
 import Link from "next/link";
 import PropTypes from "prop-types";
 
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-
-export default function OvertureWordmark({ href = "https://overturemaps.org" }) {
+// File still named OvertureWordmark for backward-compat with the Header
+// import path — the actual brand it renders is VANTAGE, matching the
+// landing page (app/page.jsx) and the browser title (app/layout.jsx). Kept
+// as its own component so re-branding again later is a one-file change.
+// The OMF logo image the old Overture Explorer wordmark carried is gone
+// on purpose — this app isn't the OMF's data explorer any more.
+export default function OvertureWordmark({ href = "/" }) {
   const isInternal = href.startsWith("/");
   const style = {
     display: "flex",
     alignItems: "center",
     textDecoration: "none",
     color: "inherit",
+    letterSpacing: "0.08em",
+    fontWeight: 700,
+    fontSize: "1.1rem",
   };
-  const contents = (
-    <>
-      <img
-        src={`${basePath}/omf_logo_transparent.png`}
-        alt={isInternal ? "" : "Overture Maps Foundation Logo"}
-        className="logo"
-        style={{ height: "2.5em", padding: "0.25em" }}
-      />
-      <b className="tour-homepage" style={{ whiteSpace: "nowrap" }}>Overture Explorer</b>
-    </>
-  );
+  const contents = <span className="tour-homepage">VANTAGE</span>;
 
   if (isInternal) {
     return (
