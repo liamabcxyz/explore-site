@@ -286,38 +286,14 @@ export default function Map({
       }
     });
 
-    // Cursor handler
-    map.on("mousemove", (e) => {
-      // Same defer as the click handler above: when the launch flow is
-      // consuming clicks here, a pointer cursor claiming "this is an
-      // inspect-able feature" is misleading — and skipping the per-hover
-      // hit-test on every mousemove during placing is also a small win.
-      if (launchAnalysis?.isVantageClickAt?.(e.lngLat)) {
-        map.getCanvas().style.cursor = "auto";
-        return;
-      }
-
-      const { targetMap, targetItems } = pickTargetMap(e);
-      const interactiveIds = getInteractiveLayerIds(targetMap, targetItems);
-
-      if (interactiveIds.length === 0) {
-        map.getCanvas().style.cursor = "auto";
-        return;
-      }
-
-      const featuresAtPoint = targetMap.queryRenderedFeatures(e.point, {
-        layers: interactiveIds,
-      });
-
-      map.getCanvas().style.cursor =
-        featuresAtPoint.some(
-          (f) =>
-            !(targetMap.getZoom() < 10 && f.source === "base") &&
-            isTypeVisible(f.layer["source-layer"], targetItems)
-        )
-          ? "pointer"
-          : "auto";
-    });
+    // Overture Explorer used to run a mousemove handler here that hit-tested
+    // every interactive layer on each fire (60+/sec while dragging) just to
+    // swap the canvas cursor between "pointer" and "auto" as a hint that a
+    // feature was inspect-able. VANTAGE is a viewshed analysis tool, not a
+    // feature inspector — the click handler above already routes launch/
+    // observer clicks around the inspect flow — so the per-hover cost isn't
+    // paying for anything the user still wants. Removed, no replacement:
+    // the cursor stays at maplibre's default across the canvas.
 
     mapRef.current = map;
     window.map = map;
