@@ -6,6 +6,7 @@ import {
   elevationScore,
   comfortFactor,
   visibilityCategory,
+  isBlocked,
   score,
   openness,
 } from "@/lib/viewshed/scoring";
@@ -152,6 +153,18 @@ describe("visibilityCategory", () => {
   it("prioritizes 'blocked' over comfort at the boundary", () => {
     // A physically blocked point is reported as blocked even at a perfect angle.
     expect(visibilityCategory(0.14, 1)).toBe("blocked");
+  });
+});
+
+describe("isBlocked", () => {
+  // Same threshold visibilityCategory uses internally — kept in sync by
+  // construction since both read BLOCKED_FRAC_THRESHOLD, not by asserting
+  // the literal 0.15 here (that'd just be a second copy to drift out of sync).
+  it("agrees with visibilityCategory's own blocked/not-blocked line", () => {
+    expect(isBlocked(0.1)).toBe(true);
+    expect(visibilityCategory(0.1, 1)).toBe("blocked");
+    expect(isBlocked(0.5)).toBe(false);
+    expect(visibilityCategory(0.5, 1)).not.toBe("blocked");
   });
 });
 

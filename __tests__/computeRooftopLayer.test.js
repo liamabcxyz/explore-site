@@ -72,4 +72,60 @@ describe("computeRooftopLayer", () => {
     // fully clear from its own roof.
     expect(result.features[1].properties.frac).toBe(1);
   });
+
+  describe("large buildings: 'mixed' when corner samples disagree with the centroid", () => {
+    // a spans x:[100,160], y:[-30,30] — a 60x60 footprint, bbox diagonal
+    // ≈84.9m, past LARGE_BUILDING_EXTENT_METERS (40) — so its own corners
+    // (100,-30)/(160,-30)/(160,30)/(100,30) get sampled in addition to its
+    // centroid (130,0). b sits off the centroid's straight-line path to the
+    // launch (the x-axis, y=0) but squarely on the diagonal from corner
+    // (100,-30) to the launch at the origin (that line is y=-0.3x; at
+    // b's x-span [40,60] it's y in [-18,-12], inside b's y-span [-25,-5]) —
+    // so the centroid reads clear while that one corner reads blocked.
+    const a = squareAt(100, 160, -30, 30, 30);
+    const b = squareAt(40, 60, -25, -5, 200);
+
+    it("marks the whole building 'mixed' rather than trusting the centroid alone", () => {
+      const result = computeRooftopLayer({
+        launch,
+        targetHeight: 50,
+        shellRadius: 10,
+        buildings: [a, b],
+      });
+      expect(result.features[0].properties.category).toBe("mixed");
+      // Geometry stays the building's real, unsplit footprint — "mixed" is
+      // just a different value in the same per-building feature, not a
+      // reason to change what gets rendered.
+      expect(result.features[0].geometry).toEqual({ type: "Polygon", coordinates: a.footprint });
+      expect(result.features[0].properties.buildingHeight).toBe(30);
+    });
+
+    it("leaves a small building's single-centroid category alone under the identical occluder", () => {
+      // Same centroid (130,0), same occluder b — only a's own footprint
+      // shrinks to 20x20 (diagonal ≈28.3m, under the 40m gate), so it never
+      // gets the extra corner samples that would otherwise disagree.
+      const small = squareAt(120, 140, -10, 10, 30);
+      const result = computeRooftopLayer({
+        launch,
+        targetHeight: 50,
+        shellRadius: 10,
+        buildings: [small, b],
+      });
+      expect(result.features[0].properties.category).not.toBe("mixed");
+    });
+
+    it("doesn't flag a large, isolated building as 'mixed' when every sample agrees", () => {
+      // No occluder at all — centroid and all 4 corners of this 80x80
+      // footprint (diagonal ≈113m, well past the gate) read fully clear.
+      const isolated = squareAt(100, 180, -40, 40, 30);
+      const result = computeRooftopLayer({
+        launch,
+        targetHeight: 50,
+        shellRadius: 10,
+        buildings: [isolated],
+      });
+      expect(result.features[0].properties.category).not.toBe("mixed");
+      expect(result.features[0].properties.frac).toBe(1);
+    });
+  });
 });

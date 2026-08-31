@@ -185,6 +185,12 @@ export default function LaunchPointControl() {
             "poor-angle", "#7e57c2",
             "partial", "#fbc02d",
             "good", "#2e7d32",
+            // Large buildings (lib/viewshed/computeRooftopLayer.js) where a
+            // few extra corner samples disagreed with the centroid on
+            // blocked-vs-not, so no single verdict is trustworthy for the
+            // whole roof. Grey reads as "uncertain," deliberately off the
+            // red/purple/yellow/green spectrum the other four use.
+            "mixed", "#9e9e9e",
             "#9e9e9e",
           ],
           "fill-extrusion-base": ["get", "buildingHeight"],
@@ -460,7 +466,8 @@ export default function LaunchPointControl() {
             />
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
               🔴 blocked by a building · 🟣 clear but a bad angle (too close/far) · 🟡 partially blocked · 🟢 good spot
-              {showRooftopLayer && " — bright outlines are buildings, colored by what their own roof can see"}
+              {showRooftopLayer &&
+                " — bright outlines are buildings, colored by what their own roof can see; ⚪ mixed (large roof, partly visible partly not)"}
             </Typography>
             <Button
               size="small"
