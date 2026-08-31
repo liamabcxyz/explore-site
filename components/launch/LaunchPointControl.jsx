@@ -7,6 +7,7 @@ import { useMapInstance } from "@/lib/MapContext";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import { createHiddenBuildingSource } from "@/lib/HiddenBuildingSource";
 import { isVantageClick } from "@/lib/launchClickCapture";
+import { parseLaunchUrlState, writeLaunchUrlState } from "@/lib/launchUrlState";
 import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
 import { filterBuildingsNearPoint } from "@/lib/geo/buildingsNearPoint";
@@ -88,6 +89,14 @@ export default function LaunchPointControl() {
   const launchAnalysis = useLaunchAnalysis();
   const setAnalysis = launchAnalysis?.setAnalysis;
   const setClickCapturePredicate = launchAnalysis?.setClickCapturePredicate;
+  // Read once, at first render, on the client (SSR safe — "use client" file
+  // but the useState initializer still needs the window guard for Jest and
+  // for the split second before hydration reaches this component tree).
+  // Passing a function to useState means this only runs once, not per render.
+  const [urlInitialState] = useState(() => {
+    if (typeof window === "undefined") return {};
+    return parseLaunchUrlState(window.location.search);
+  });
   // Memoized so the fallback object (only used if this ever renders outside
   // a LaunchProvider) doesn't change identity every render and thrash the
   // profile effect's dependency array below.
@@ -98,12 +107,12 @@ export default function LaunchPointControl() {
   );
   const setViewerLevel = launchAnalysis?.setViewerLevel;
   const [placing, setPlacing] = useState(false);
-  const [launch, setLaunch] = useState(null);
+  const [launch, setLaunch] = useState(() => urlInitialState.launch ?? null);
   // Caliber drives both burst height and shell radius (烟花可视性数学模型.md
   // §1.4) — no manual override of the derived values, since letting a user
   // set height/radius independently is exactly the physically-inconsistent-
   // combination bug this replaces.
-  const [caliber, setCaliber] = useState(3);
+  const [caliber, setCaliber] = useState(() => urlInitialState.caliber ?? 3);
   const { targetHeight: caliberHeight, shellRadius } = deriveShellParams(caliber);
   // A launch point placed on a rooftop/terrace burns from that roof's height,
   // not from z=0 ground — deriveShellParams stays a pure "caliber -> height
@@ -120,13 +129,25 @@ export default function LaunchPointControl() {
   // answers "what does the area look like if rooftop access were
   // universal," a different question from "can I see it from this one
   // specific spot I picked."
-  const [showRooftopLayer, setShowRooftopLayer] = useState(false);
-  const [observer, setObserver] = useState(null);
+  const [showRooftopLayer, setShowRooftopLayer] = useState(() => urlInitialState.showRooftopLayer ?? false);
+  // Observer restore only makes sense when the URL also carried a launch
+  // point — a lone `?observer=` would open the profile panel pointing at a
+  // launch that isn't there. The launch-effect guard below already re-checks,
+  // but null-ing here keeps the initial render honest too.
+  const [observer, setObserver] = useState(() =>
+    urlInitialState.launch && urlInitialState.observer ? urlInitialState.observer : null
+  );
   const markerRef = useRef(null);
   const observerMarkerRef = useRef(null);
   const placingRef = useRef(placing);
   const workerRef = useRef(null);
   const hiddenSourceRef = useRef(null);
+  // Flipped once the setup effect below has added VANTAGE's own source and
+  // layer to the map. The grid/profile effects gate on it so a URL-restored
+  // launch point (which sits in state before the map's style has finished
+  // loading, unlike a click-placed one) will still compute — otherwise the
+  // grid effect would early-return on the missing source and never re-run.
+  const [sourcesRegistered, setSourcesRegistered] = useState(false);
   // Bumped on every grid request so a response that arrives after a newer
   // request was already sent (rapid caliber drags, mainly) gets ignored
   // instead of overwriting the map with stale data — see the grid effect
@@ -136,6 +157,41 @@ export default function LaunchPointControl() {
   useEffect(() => {
     placingRef.current = placing;
   }, [placing]);
+
+  // viewerLevel lives in LaunchProvider's context state (ProfilePanel writes
+  // to it), so unlike launch/caliber/etc. we can't seed it via useState. Push
+  // it in once on mount if the URL had one, and only if it's meaningful — a
+  // level without an observer point has nothing to attach to.
+  useEffect(() => {
+    if (!setViewerLevel) return;
+    if (urlInitialState.launch && urlInitialState.observer && urlInitialState.viewerLevel) {
+      setViewerLevel(urlInitialState.viewerLevel);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mirror the current analysis state back to URL query params so a copied
+  // link restores it. Guarded against writing the same string every render
+  // (the browser rate-limits history.replaceState per app/map/page.jsx:121).
+  // Map camera state stays in the URL fragment via maplibre's own hash:true;
+  // that hash and these params live on opposite sides of the "?" / "#" split
+  // so the two writers don't interact.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const currentSearch = window.location.search.startsWith("?")
+      ? window.location.search.slice(1)
+      : window.location.search;
+    const nextSearch = writeLaunchUrlState(currentSearch, {
+      launch,
+      caliber,
+      observer,
+      viewerLevel: contextViewerLevel,
+      showRooftopLayer,
+    });
+    if (nextSearch === currentSearch) return;
+    const url = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", url);
+  }, [launch, caliber, observer, contextViewerLevel, showRooftopLayer]);
 
   // Publish "does VANTAGE want to keep this click for itself?" through the
   // launch context so MapView.jsx's own click handler can early-return
@@ -181,7 +237,12 @@ export default function LaunchPointControl() {
   const getHiddenSource = useCallback(() => {
     if (!map) return null;
     if (!hiddenSourceRef.current) {
-      const buildingsSource = map.getStyle().sources?.buildings;
+      // map.getStyle() can be undefined before the style has loaded — the URL-
+      // restore path hits this before mapLoaded, since launch state seeds from
+      // the URL synchronously and the profile effect fires as soon as launch
+      // and observer both exist, well before the "buildings" source has been
+      // added by MapView's own load-driven addSources() effect.
+      const buildingsSource = map.getStyle()?.sources?.buildings;
       if (!buildingsSource?.url) return null;
       hiddenSourceRef.current = createHiddenBuildingSource(buildingsSource.url);
     }
@@ -258,6 +319,7 @@ export default function LaunchPointControl() {
           "fill-extrusion-opacity": 0.85,
         },
       });
+      setSourcesRegistered(true);
     };
     if (map.isStyleLoaded()) setup();
     else map.once("idle", setup);
@@ -419,7 +481,7 @@ export default function LaunchPointControl() {
     return () => {
       cancelled = true;
     };
-  }, [map, launch, caliberHeight, shellRadius, getHiddenSource]);
+  }, [map, launch, caliberHeight, shellRadius, getHiddenSource, sourcesRegistered]);
 
   // Full sightline breakdown for whichever point the user picked, published
   // to LaunchContext so ProfilePanel (mounted elsewhere, inside SidePanel)
