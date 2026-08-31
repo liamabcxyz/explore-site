@@ -64,6 +64,18 @@ for (const theme of ["base", "buildings", "transportation", "addresses", "places
 }
 
 
+// Overture Explorer's compare-slider UI (a second full maplibre-gl instance
+// styled to expose raw Overture data — building outlines, road classification,
+// address dots — with a drag-to-reveal divider) is turned off for VANTAGE:
+// this app is a viewshed analysis tool, not a data-inspector, and none of the
+// analysis or debug workflows here need it. Left in the tree behind this flag
+// so a future Overture-data-completeness check can flip it back with a single
+// constant. Every effect/JSX block that costs anything at runtime gates on
+// this — the useState/useRef declarations stay live either way (cheap; keeps
+// re-enable diff-free). See app/map/page.jsx for the URL-mode consequence
+// (?mode=explore|inspect becomes a no-op).
+const ENABLE_INSPECT_COMPARE = false;
+
 // this reference must remain constant to avoid re-renders
 const MAP_STYLE = {
   version: 8,
@@ -299,35 +311,41 @@ export default function Map({
     window.map = map;
     if (onMapReady) onMapReady(map);
 
-    // Create inspect map (non-interactive overlay, camera-synced)
-    const inspectMap = new maplibregl.Map({
-      container: inspectMapContainer.current,
-      style: MAP_STYLE,
-      center: initialPosition?.center || INITIAL_CENTER,
-      zoom: initialPosition?.zoom || INITIAL_ZOOM,
-      bearing: 0,
-      pitch: 0,
-      hash: false,
-      attributionControl: false,
-      interactive: false,
-    });
-
-    inspectMap.on("load", () => setInspectMapLoaded(true));
-
-    map.on("move", () => {
-      inspectMap.jumpTo({
-        center: map.getCenter(),
-        zoom: map.getZoom(),
-        bearing: map.getBearing(),
-        pitch: map.getPitch(),
+    // Create inspect map (non-interactive overlay, camera-synced) — off by
+    // default (see ENABLE_INSPECT_COMPARE above). When off, inspectMapRef
+    // stays null, and the pickTargetMap / setProjection / resize sites that
+    // read it already short-circuit correctly.
+    let inspectMap = null;
+    if (ENABLE_INSPECT_COMPARE) {
+      inspectMap = new maplibregl.Map({
+        container: inspectMapContainer.current,
+        style: MAP_STYLE,
+        center: initialPosition?.center || INITIAL_CENTER,
+        zoom: initialPosition?.zoom || INITIAL_ZOOM,
+        bearing: 0,
+        pitch: 0,
+        hash: false,
+        attributionControl: false,
+        interactive: false,
       });
-    });
 
-    inspectMapRef.current = inspectMap;
+      inspectMap.on("load", () => setInspectMapLoaded(true));
+
+      map.on("move", () => {
+        inspectMap.jumpTo({
+          center: map.getCenter(),
+          zoom: map.getZoom(),
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+        });
+      });
+
+      inspectMapRef.current = inspectMap;
+    }
 
     return () => {
       map.remove();
-      inspectMap.remove();
+      if (inspectMap) inspectMap.remove();
       maplibregl.removeProtocol("pmtiles");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -345,6 +363,7 @@ export default function Map({
 
   // Add sources and inspect layers to the inspect map
   useEffect(() => {
+    if (!ENABLE_INSPECT_COMPARE) return;
     if (!inspectMapLoaded || !inspectMapRef.current || Object.keys(pmtilesUrls).length === 0) return;
     const inspectMap = inspectMapRef.current;
     addSources(inspectMap, pmtilesUrls);
@@ -359,6 +378,7 @@ export default function Map({
 
   // Update inspect-map layer visibility when its own inspectVisibleTypes change
   useEffect(() => {
+    if (!ENABLE_INSPECT_COMPARE) return;
     if (!inspectMapLoaded || !inspectMapRef.current) return;
     updateInspectVisibility(inspectMapRef.current, inspectVisibleTypes);
   }, [inspectVisibleTypes, inspectMapLoaded]);
@@ -532,6 +552,7 @@ export default function Map({
   }, []);
 
   useEffect(() => {
+    if (!ENABLE_INSPECT_COMPARE) return;
     const handleMove = (e) => {
       if (!draggingRef.current) return;
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -573,6 +594,7 @@ export default function Map({
           }}
         >
           <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
+          {ENABLE_INSPECT_COMPARE && (
           <div
             ref={inspectMapContainer}
             style={{
@@ -584,7 +606,9 @@ export default function Map({
               transition: !dragging ? "clip-path 300ms ease" : undefined,
             }}
           />
+          )}
           {/* Divider with snap handle */}
+          {ENABLE_INSPECT_COMPARE && (
           <div
             style={{
               position: "absolute",
@@ -684,6 +708,7 @@ export default function Map({
               </button>
             </div>
           </div>
+          )}
         </div>
 
         <FeaturePopup
