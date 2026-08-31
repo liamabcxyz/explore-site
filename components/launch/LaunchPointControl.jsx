@@ -16,6 +16,7 @@ import { METERS_PER_FLOOR } from "@/lib/geo/normalizeBuilding";
 import { reportViewshedPerf } from "@/lib/perf";
 import { EYE_HEIGHT } from "@/lib/viewshed/scoring";
 import { computeSightlineProfile } from "@/lib/viewshed/computeProfile";
+import { pickTopSpots } from "@/lib/viewshed/pickTopSpots";
 import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
 
 // 1500m covers the full comfortable viewing ring even for a 12" shell.
@@ -58,6 +59,141 @@ const ROOFTOP_LEGEND_EXTRA = {
   color: "#9e9e9e",
   label: "Large roof — partly visible",
 };
+
+// Global CSS for the firework animation. Rendered as a plain <style>
+// element (not scoped) because the elements being styled are created via
+// document.createElement and handed to a maplibre Marker — they aren't
+// React children, so JSX-scoped CSS-in-JS wouldn't reach them. The rules
+// use the vantage-fw- prefix to keep the class-name namespace polluted
+// only in an intentionally scoped way.
+//
+// The animation has four layered pieces, all in screen space (a literal
+// altitude visualization would need a 3D scene; this is decoration):
+//   1. Rise — a bright dot with a trailing streak climbs to the apex.
+//   2. Flash — a bright white/orange radial pulse at the apex marks the
+//      burst moment.
+//   3. Particles — 60 small glowing dots fly outward from the apex on
+//      per-particle angles + distances (set via --dx/--dy CSS vars) with
+//      a gravity droop in the second half and a color/hue per-particle
+//      (via --hue). Real fireworks are hundreds of independent points
+//      arcing with gravity in mixed colors; this ports that structure
+//      into pure CSS.
+//   4. Smoke — a soft grey fade lingers briefly at the burst position so
+//      the burst doesn't just vanish cleanly.
+const FIREWORK_CSS = `
+@keyframes vantage-fw-rise {
+  0%   { transform: translate(-3px, 0);      opacity: 1; }
+  100% { transform: translate(-3px, -140px); opacity: 1; }
+}
+@keyframes vantage-fw-rise-fade {
+  0%, 92% { opacity: 1; }
+  100%    { opacity: 0; }
+}
+@keyframes vantage-fw-flash {
+  0%, 35% { transform: translate(-30px, -155px) scale(0);   opacity: 0; }
+  40%     { transform: translate(-30px, -155px) scale(0.3); opacity: 1; }
+  55%     { transform: translate(-30px, -155px) scale(1);   opacity: 0.85; }
+  100%    { transform: translate(-30px, -155px) scale(1.6); opacity: 0; }
+}
+@keyframes vantage-fw-particle {
+  0%   { transform: translate(-2px, -140px);           opacity: 1; }
+  55%  { transform: translate(calc(-2px + var(--dx) * 0.65),
+                              calc(-140px + var(--dy) * 0.65));
+         opacity: 1; }
+  100% { transform: translate(calc(-2px + var(--dx)),
+                              calc(-140px + var(--dy) + 45px));
+         opacity: 0; }
+}
+@keyframes vantage-fw-smoke {
+  0%, 45% { transform: translate(-40px, -170px) scale(0);   opacity: 0; }
+  55%     { transform: translate(-40px, -170px) scale(0.6); opacity: 0.35; }
+  100%    { transform: translate(-40px, -190px) scale(1.4); opacity: 0; }
+}
+.vantage-fw-trail {
+  position: absolute; left: 0; bottom: 0;
+  width: 6px; height: 6px;
+  background: radial-gradient(circle, #fff 0%, #ffe08a 45%, rgba(255,224,138,0) 75%);
+  border-radius: 50%;
+  box-shadow:
+    0 8px  4px  -1px rgba(255,224,138,0.75),
+    0 16px 6px  -2px rgba(255,190, 90,0.55),
+    0 24px 8px  -3px rgba(255,150, 60,0.35),
+    0 32px 10px -4px rgba(255,120, 40,0.15);
+  animation:
+    vantage-fw-rise 700ms cubic-bezier(0.18, 0.7, 0.35, 1) forwards,
+    vantage-fw-rise-fade 800ms linear forwards;
+}
+.vantage-fw-flash {
+  position: absolute; left: 0; bottom: 0;
+  width: 60px; height: 60px;
+  background: radial-gradient(circle, rgba(255,255,255,0.95) 0%,
+    rgba(255,220,140,0.75) 25%, rgba(255,150,60,0.4) 50%, rgba(255,80,40,0) 72%);
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  animation: vantage-fw-flash 900ms ease-out 700ms forwards;
+}
+.vantage-fw-particle {
+  position: absolute; left: 0; bottom: 0;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%,
+    hsl(var(--hue) 100% 65%) 40%,
+    hsla(var(--hue) 100% 55% / 0) 72%);
+  box-shadow: 0 0 5px 1px hsla(var(--hue) 100% 65% / 0.75);
+  mix-blend-mode: screen;
+  animation: vantage-fw-particle 1600ms cubic-bezier(0.15, 0.7, 0.35, 1) 750ms forwards;
+}
+.vantage-fw-smoke {
+  position: absolute; left: 0; bottom: 0;
+  width: 80px; height: 80px;
+  background: radial-gradient(circle, rgba(200,200,210,0.55) 0%,
+    rgba(180,180,190,0.3) 40%, rgba(160,160,170,0) 70%);
+  border-radius: 50%;
+  filter: blur(6px);
+  animation: vantage-fw-smoke 1800ms ease-out 900ms forwards;
+}
+`;
+
+// Palette — pick a random one per burst so consecutive fireworks look
+// different. Each entry is a list of hues (0-360) the particles draw from.
+// Warm mixes read as classic Chinese/American fireworks; the mixed set
+// reads as a modern professional display.
+const FIREWORK_PALETTES = [
+  { name: "gold-red", hues: [45, 30, 15, 5, 350] },
+  { name: "chrysanthemum", hues: [50, 40, 30, 25, 20, 15] },
+  { name: "peacock", hues: [200, 190, 170, 150, 130] },
+  { name: "rainbow", hues: [0, 45, 90, 135, 180, 225, 270, 315] },
+  { name: "willow", hues: [40, 30, 20, 15, 10] },
+];
+
+// Build the marker's inner HTML — trail, flash, N particles with per-
+// particle angle/distance/hue via CSS variables, smoke. Returns a plain
+// HTML string so the caller can `el.innerHTML = ...` without doing any
+// DOM construction itself.
+function buildFireworkHtml() {
+  const palette = FIREWORK_PALETTES[Math.floor(Math.random() * FIREWORK_PALETTES.length)];
+  const particleCount = 60;
+  const parts = ['<div class="vantage-fw-smoke"></div>'];
+  parts.push('<div class="vantage-fw-flash"></div>');
+  parts.push('<div class="vantage-fw-trail"></div>');
+  for (let i = 0; i < particleCount; i++) {
+    // Even angular distribution with a small jitter so particles don't
+    // look uniformly grid-spaced (real bursts are irregular).
+    const baseAngle = (i / particleCount) * Math.PI * 2;
+    const angle = baseAngle + (Math.random() - 0.5) * 0.25;
+    // Radial distance jitter so some particles fly further than others,
+    // giving the burst thickness.
+    const distance = 90 + Math.random() * 60;
+    const dx = Math.cos(angle) * distance;
+    const dy = Math.sin(angle) * distance;
+    const hue = palette.hues[Math.floor(Math.random() * palette.hues.length)];
+    const delay = Math.random() * 60; // ms stagger — tiny, mostly synchronous
+    parts.push(
+      `<div class="vantage-fw-particle" style="--dx:${dx.toFixed(1)}px;--dy:${dy.toFixed(1)}px;--hue:${hue};animation-delay:${750 + delay}ms"></div>`
+    );
+  }
+  return parts.join("");
+}
 
 function LegendSwatch({ color }) {
   return (
@@ -142,6 +278,19 @@ export default function LaunchPointControl() {
   const placingRef = useRef(placing);
   const workerRef = useRef(null);
   const hiddenSourceRef = useRef(null);
+  // Firework-animation trigger. Bumped once when a launch point is placed
+  // (initial or via URL restore) so the animation plays on first render,
+  // and again whenever the user hits "Play again." A monotonic counter
+  // rather than a boolean because that's what makes the "same launch
+  // point, replay" case a state change (a boolean toggle would need two
+  // clicks to fire twice).
+  const [fireworkPlayCount, setFireworkPlayCount] = useState(0);
+  const lastPlayedFor = useRef(null);
+  // Top recommended viewing spots, derived from the ground grid once the
+  // worker returns — see pickTopSpots.js. Small array of {rank, score,
+  // lat, lng}; markers are managed by a separate effect below.
+  const [topSpots, setTopSpots] = useState([]);
+  const topSpotMarkersRef = useRef([]);
   // Flipped once the setup effect below has added VANTAGE's own source and
   // layer to the map. The grid/profile effects gate on it so a URL-restored
   // launch point (which sits in state before the map's style has finished
@@ -405,6 +554,71 @@ export default function LaunchPointControl() {
     }
   }, [map, observer]);
 
+  // Auto-play the firework the first time each new launch point appears
+  // (both fresh clicks and URL restores). A ref keyed by the launch
+  // point's coord string, not just presence, so replacing the launch
+  // point with a new one plays again, and re-render churn on the same
+  // launch doesn't retrigger.
+  useEffect(() => {
+    if (!launch) {
+      lastPlayedFor.current = null;
+      return;
+    }
+    const key = `${launch.lat},${launch.lng}`;
+    if (lastPlayedFor.current === key) return;
+    lastPlayedFor.current = key;
+    setFireworkPlayCount((n) => n + 1);
+  }, [launch]);
+
+  // Firework animation. Mounts a marker whose element runs the rise +
+  // flash + particle-burst + smoke keyframes above, then removes itself
+  // after ~2.7s (rise 700ms + burst 1600ms + smoke tail + a small buffer).
+  // Purely decorative — does not touch analysis state, and the marker is
+  // separate from the permanent launch-point marker (`markerRef`), so
+  // both can render at the same lat/lng together. New palette + jittered
+  // particle angles/hues on every play so consecutive fireworks don't
+  // look identical.
+  useEffect(() => {
+    if (!map || !launch || fireworkPlayCount === 0) return;
+    const el = document.createElement("div");
+    el.innerHTML = buildFireworkHtml();
+    el.style.cssText = "position:relative; width:0; height:0; pointer-events:none; z-index:5;";
+    const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
+      .setLngLat([launch.lng, launch.lat])
+      .addTo(map);
+    const timeoutId = setTimeout(() => marker.remove(), 2800);
+    return () => {
+      clearTimeout(timeoutId);
+      marker.remove();
+    };
+  }, [map, launch, fireworkPlayCount]);
+
+  // Numbered markers for the top recommended viewing spots. Separate
+  // effect from the animation so the two lifecycles don't fight — top
+  // spots persist until the next analysis or clear, animations are
+  // one-shot.
+  useEffect(() => {
+    if (!map) return;
+    for (const marker of topSpotMarkersRef.current) marker.remove();
+    topSpotMarkersRef.current = [];
+    for (const spot of topSpots) {
+      const el = document.createElement("div");
+      el.textContent = String(spot.rank);
+      el.style.cssText =
+        "width:24px;height:24px;border-radius:50%;background:#2e7d32;color:white;" +
+        "display:flex;align-items:center;justify-content:center;font-weight:700;" +
+        "font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.35);border:2px solid white;";
+      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat([spot.lng, spot.lat])
+        .addTo(map);
+      topSpotMarkersRef.current.push(marker);
+    }
+    return () => {
+      for (const marker of topSpotMarkersRef.current) marker.remove();
+      topSpotMarkersRef.current = [];
+    };
+  }, [map, topSpots]);
+
   useEffect(() => {
     if (!map || !map.getSource(SOURCE_ID)) return;
     // MapView adds its own ~100 layers asynchronously as PMTiles sources load,
@@ -420,6 +634,7 @@ export default function LaunchPointControl() {
         map.getSource(ROOFTOP_SOURCE_ID).setData({ type: "FeatureCollection", features: [] });
       }
       setRooftopBase(0);
+      setTopSpots([]);
       return;
     }
 
@@ -456,6 +671,7 @@ export default function LaunchPointControl() {
           const { grid, rooftop: rooftopLayer } = e.data;
           map.getSource(SOURCE_ID).setData(grid);
           if (map.getSource(ROOFTOP_SOURCE_ID)) map.getSource(ROOFTOP_SOURCE_ID).setData(rooftopLayer);
+          setTopSpots(pickTopSpots(grid.features));
           reportViewshedPerf({
             queryMs,
             computeMs,
@@ -545,6 +761,8 @@ export default function LaunchPointControl() {
   }, [map, launch, observer, targetHeight, shellRadius, caliber, viewerLevel, setAnalysis, getHiddenSource]);
 
   return (
+    <>
+    <style dangerouslySetInnerHTML={{ __html: FIREWORK_CSS }} />
     <Paper
       elevation={4}
       sx={{
@@ -580,11 +798,21 @@ export default function LaunchPointControl() {
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
               Click any spot in the circle to check what&apos;s visible from there.
             </Typography>
-            <Typography variant="caption">
-              Caliber: {caliber}&quot; · burst ~{Math.round(targetHeight)}m
-              {rooftopBase > 0 && ` (incl. ${Math.round(rooftopBase)}m rooftop)`}
-              {" "}· shell ~{Math.round(shellRadius)}m · {ANALYSIS_RADIUS / 1000} km radius
-            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+              <Typography variant="caption">
+                Caliber: {caliber}&quot; · burst ~{Math.round(targetHeight)}m
+                {rooftopBase > 0 && ` (incl. ${Math.round(rooftopBase)}m rooftop)`}
+                {" "}· shell ~{Math.round(shellRadius)}m
+              </Typography>
+              <Button
+                size="small"
+                sx={{ minWidth: 0, px: 0.5, fontSize: 11, textTransform: "none", flexShrink: 0 }}
+                onClick={() => setFireworkPlayCount((n) => n + 1)}
+                aria-label="Play firework animation again"
+              >
+                🎆 Play
+              </Button>
+            </Stack>
             <Slider
               min={3}
               max={12}
@@ -624,5 +852,6 @@ export default function LaunchPointControl() {
         )}
       </Stack>
     </Paper>
+    </>
   );
 }
