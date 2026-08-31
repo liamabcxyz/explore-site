@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
-import { Paper, Button, Typography, Slider, Stack, Switch, FormControlLabel } from "@mui/material";
+import { Box, Paper, Button, Typography, Slider, Stack, Switch, FormControlLabel } from "@mui/material";
 import { useMapInstance } from "@/lib/MapContext";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import { createHiddenBuildingSource } from "@/lib/HiddenBuildingSource";
@@ -37,6 +37,51 @@ const LAYER_ID = "vantage-viewshed-sectors";
 // effect below.
 const ROOFTOP_SOURCE_ID = "vantage-viewshed-rooftop";
 const ROOFTOP_LAYER_ID = "vantage-viewshed-rooftop-buildings";
+
+// Legend entries, in the same visual order as the paint expression above so
+// a reader glancing between panel and map matches them by row position, not
+// by re-reading each label. Colors are the literal fill values from
+// scoring.js's `visibilityCategory` mapping (kept in sync manually; there
+// aren't enough of them to justify hoisting a shared constants module).
+const LEGEND_ENTRIES = [
+  { color: "#2e7d32", label: "Good spot" },
+  { color: "#fbc02d", label: "Partially blocked" },
+  { color: "#7e57c2", label: "Bad viewing angle (too close or far)" },
+  { color: "#d32f2f", label: "Blocked by a building" },
+];
+
+// Only added to the legend when the rooftop overlay is visible — the mixed
+// category is a per-building call that doesn't exist for ground-grid cells,
+// so showing it alongside the ground legend would be a lie.
+const ROOFTOP_LEGEND_EXTRA = {
+  color: "#9e9e9e",
+  label: "Large roof — partly visible",
+};
+
+function LegendSwatch({ color }) {
+  return (
+    <Box
+      component="span"
+      sx={{
+        display: "inline-block",
+        width: 14,
+        height: 14,
+        borderRadius: 0.5,
+        bgcolor: color,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+function LegendRow({ color, label }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <LegendSwatch color={color} />
+      <Typography variant="caption" sx={{ color: "text.secondary" }}>{label}</Typography>
+    </Stack>
+  );
+}
 
 export default function LaunchPointControl() {
   const map = useMapInstance();
@@ -454,6 +499,15 @@ export default function LaunchPointControl() {
         <Button variant={placing ? "contained" : "outlined"} onClick={() => setPlacing((p) => !p)}>
           {placing ? "Click the map to place…" : launch ? "Move launch point" : "Set launch point"}
         </Button>
+        {!launch && (
+          // Empty-state hint. The landing page (app/page.jsx) explains the
+          // app once; once the user's on the map, the button label alone
+          // uses jargon ("launch point") without saying what the app does —
+          // this one line closes that gap without hijacking the panel.
+          <Typography variant="caption" sx={{ color: "text.secondary" }}>
+            Click the button, then click a spot on the map to see where the fireworks would be visible within a {ANALYSIS_RADIUS / 1000} km radius.
+          </Typography>
+        )}
         {launch && (
           <>
             <Typography variant="caption">
@@ -479,11 +533,14 @@ export default function LaunchPointControl() {
               }
               label="Show rooftop view"
             />
-            <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              🔴 blocked by a building · 🟣 clear but a bad angle (too close/far) · 🟡 partially blocked · 🟢 good spot
-              {showRooftopLayer &&
-                " — bright outlines are buildings, colored by what their own roof can see; ⚪ mixed (large roof, partly visible partly not)"}
-            </Typography>
+            <Stack spacing={0.5}>
+              {LEGEND_ENTRIES.map((entry) => (
+                <LegendRow key={entry.color} color={entry.color} label={entry.label} />
+              ))}
+              {showRooftopLayer && (
+                <LegendRow color={ROOFTOP_LEGEND_EXTRA.color} label={ROOFTOP_LEGEND_EXTRA.label} />
+              )}
+            </Stack>
             <Button
               size="small"
               onClick={() => {
