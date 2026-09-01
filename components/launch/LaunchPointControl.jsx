@@ -17,6 +17,7 @@ import { reportViewshedPerf } from "@/lib/perf";
 import { EYE_HEIGHT } from "@/lib/viewshed/scoring";
 import { computeSightlineProfile } from "@/lib/viewshed/computeProfile";
 import { pickTopSpots } from "@/lib/viewshed/pickTopSpots";
+import { loadElevationGridForBounds } from "@/lib/viewshed/ElevationGrid";
 import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
 
 // 1500m covers the full comfortable viewing ring even for a 12" shell.
@@ -278,6 +279,13 @@ export default function LaunchPointControl() {
   const placingRef = useRef(placing);
   const workerRef = useRef(null);
   const hiddenSourceRef = useRef(null);
+  // Latest terrain grid — loaded when a launch point is set, passed to
+  // the worker (for grid+rooftop compute) and to computeSightlineProfile
+  // (for the observer-picked profile). Null when no launch yet, no
+  // terrain available, or the fetch failed — all treated as flat ground
+  // by the downstream compute functions (see 地形高程集成_实施方案.md §9.2
+  // — graceful downgrade path).
+  const elevationGridRef = useRef(null);
   // Firework-animation trigger. Bumped once when a launch point is placed
   // (initial or via URL restore) so the animation plays on first render,
   // and again whenever the user hits "Play again." A monotonic counter
@@ -646,8 +654,36 @@ export default function LaunchPointControl() {
     const requestId = ++requestIdRef.current;
     const queryStart = performance.now();
 
-    hiddenSource.query(launch, ANALYSIS_RADIUS).then(({ buildingFeats, partFeats }) => {
+    // Kick off building query and terrain fetch in parallel — both are
+    // network-bound, no ordering constraint between them. loadElevation-
+    // GridForBounds is browser-only (fetch + createImageBitmap +
+    // OffscreenCanvas per ElevationGrid.js) but this whole effect only
+    // runs client-side. Bbox is the axis-aligned square inscribing the
+    // 1500m analysis circle (slight overload vs. tight circle, but
+    // simpler and terrain data is small enough that it doesn't matter).
+    const terrainProjector = makeLocalProjector(launch.lat, launch.lng);
+    const ne = terrainProjector.toLatLng(ANALYSIS_RADIUS, ANALYSIS_RADIUS);
+    const sw = terrainProjector.toLatLng(-ANALYSIS_RADIUS, -ANALYSIS_RADIUS);
+    const terrainPromise = loadElevationGridForBounds({
+      westLng: sw.lng,
+      southLat: sw.lat,
+      eastLng: ne.lng,
+      northLat: ne.lat,
+    }).catch((err) => {
+      // Failure downgrade path per 实施方案.md §9.2 — surface via console
+      // and continue with null so the analysis still produces a result
+      // (flat-ground fallback). Loud fail here would leave the user with
+      // no output at all.
+      console.warn("terrain load failed, falling back to flat ground:", err);
+      return null;
+    });
+
+    Promise.all([
+      hiddenSource.query(launch, ANALYSIS_RADIUS),
+      terrainPromise,
+    ]).then(([{ buildingFeats, partFeats }, terrainGrid]) => {
       if (cancelled || requestId !== requestIdRef.current) return; // superseded by a newer request
+      elevationGridRef.current = terrainGrid;
       const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
       // Nothing farther than the analysis radius from the launch point can
       // ever sit on a sightline the grid tests — cutting them here shrinks the
@@ -662,11 +698,34 @@ export default function LaunchPointControl() {
       const rooftop = findRooftopBase(launch, buildings);
       setRooftopBase(rooftop);
 
+      // Serialize terrainGrid for postMessage — structuredClone preserves
+      // the TypedArray buffer but not class methods, so send the plain
+      // shape and rebuild the class on the worker side (see worker.js).
+      const terrainPayload = terrainGrid
+        ? {
+            buffer: terrainGrid.data.buffer,
+            cellsX: terrainGrid.cellsX,
+            cellsY: terrainGrid.cellsY,
+            northLat: terrainGrid.northLat,
+            westLng: terrainGrid.westLng,
+            latStepDeg: terrainGrid.latStepDeg,
+            lngStepDeg: terrainGrid.lngStepDeg,
+          }
+        : null;
+
       const computeStart = performance.now();
       worker.addEventListener(
         "message",
         (e) => {
           if (requestId !== requestIdRef.current) return; // superseded by a newer request
+          if (e.data.error) {
+            // Worker-side exception surfaced via message payload (worker
+            // exceptions don't propagate as pageerror). Log loud and skip
+            // the render step; the grid stays empty rather than being
+            // updated with garbage.
+            console.error("viewshed worker error:", e.data.error);
+            return;
+          }
           const computeMs = performance.now() - computeStart;
           const { grid, rooftop: rooftopLayer } = e.data;
           map.getSource(SOURCE_ID).setData(grid);
@@ -691,6 +750,7 @@ export default function LaunchPointControl() {
         radialSpacing: RADIAL_SPACING,
         angularSpacing: ANGULAR_SPACING,
         buildings,
+        terrainGrid: terrainPayload,
       });
     });
 
@@ -749,6 +809,14 @@ export default function LaunchPointControl() {
         shellRadius,
         buildings,
         observerHeight,
+        // Reuse the terrain grid the grid effect above already fetched
+        // for this launch point (elevationGridRef.current). May be null
+        // if the launch point was just placed and the grid effect hasn't
+        // finished yet — that races cleanly, since computeSightlineProfile
+        // treats null as flat ground and the effect re-runs when the
+        // grid arrives (elevationGridRef updates → next launch/observer
+        // change triggers this again with the latest value).
+        terrainGrid: elevationGridRef.current,
       });
 
       const observerBuilding = building ? { ...building, maxFloors } : null;
