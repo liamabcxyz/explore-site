@@ -925,12 +925,22 @@ export default function LaunchPointControl() {
       elevation={4}
       sx={{
         position: "fixed",
-        bottom: "calc(var(--vantage-profile-dock-height, 0px) + 24px)",
-        left: "50%",
-        transform: "translateX(-50%)",
+        // Top-left, below the 60px header. Was left:50% + translateX(-50%),
+        // which put the panel dead-center on top of the launch pin the
+        // user had just placed near the middle of the map. Bottom-left is
+        // taken by the star bookmark dial (BookmarkDial, also left: 24),
+        // and top-right by the zoom/geolocate/terrain map controls, so
+        // top-left is the only conflict-free corner.
+        top: 84,
+        left: 24,
         zIndex: 1200,
         p: 2,
         width: 300,
+        // Prevent the panel outgrowing the viewport when both the header
+        // (60px) and the bottom dock (up to ~292px) are on screen — its
+        // internal Stack scrolls in the rare case that overflows.
+        maxHeight: "calc(100vh - 60px - var(--vantage-profile-dock-height, 0px) - 48px)",
+        overflow: "auto",
       }}
     >
       <Stack spacing={1.5}>

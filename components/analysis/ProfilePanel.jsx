@@ -573,11 +573,26 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
     ? `This spot is on a ~${Math.round(observerBuilding.height)}m building`
     : `${verdictDetail} ${distanceLabel}.`;
 
+  // Category and verdict live on different axes: verdict is fraction-of-shell
+  // (pure blockage geometry), category folds in apparent size + elevation
+  // angle. Only surface the category chip on the secondary line when it
+  // actually contradicts the fraction verdict — otherwise "Blocked ...
+  // Quality 0% (Blocked)" reads as a stutter.
+  const verdictBucket = frac >= 0.66 ? "good" : frac >= 0.33 ? "partial" : "blocked";
+  const categoryContradicts = profile.category !== verdictBucket;
+  const secondaryBits = [
+    distanceLabel,
+    frac < 1 && frac > 0 ? `clears at ${Math.round(minAlt)}m` : null,
+    frac <= 0 && Number.isFinite(minAlt) ? `needs ${Math.round(minAlt)}m to clear` : null,
+    blocker?.name || null,
+    categoryContradicts ? CATEGORY_LABEL[profile.category] : null,
+  ].filter(Boolean).join(" · ");
+
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <Stack
         direction="row"
-        spacing={1.5}
+        spacing={2}
         sx={{
           height: PROFILE_DOCK_HEADER_PX,
           px: 2,
@@ -589,26 +604,33 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
         }}
       >
         <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: color, flexShrink: 0 }} />
-        <Typography variant="subtitle2" sx={{ fontFamily: "Montserrat, sans-serif", whiteSpace: "nowrap" }}>
-          {label} — {Math.round(frac * 100)}%
-        </Typography>
-        <Typography
-          variant="caption"
-          title={hintBits || headerTitle}
-          sx={{
-            color: isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.6)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            minWidth: 0,
-            flex: 1,
-          }}
-        >
-          {verdictDetail} {distanceLabel}.
-          {blocker?.name ? ` ${blocker.name}.` : ""}
-          {" "}
-          Quality {Math.round(profile.score * 100)}% ({CATEGORY_LABEL[profile.category]}).
-        </Typography>
+        <Stack sx={{ minWidth: 0, flex: 1, gap: 0.25 }}>
+          <Typography
+            variant="subtitle2"
+            sx={{
+              fontFamily: "Montserrat, sans-serif",
+              lineHeight: 1.2,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {label} — {Math.round(frac * 100)}% of the shell
+          </Typography>
+          <Typography
+            variant="caption"
+            title={hintBits || secondaryBits}
+            sx={{
+              color: isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.6)",
+              lineHeight: 1.2,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {secondaryBits}
+          </Typography>
+        </Stack>
         {analysis.loading && (
           <Typography variant="caption" sx={{ color: captionColor, flexShrink: 0 }}>
             Updating…

@@ -9,9 +9,14 @@ export const PROFILE_DOCK_HEADER_PX = 56;
 export const PROFILE_DOCK_CHART_PX = 236;
 export const PROFILE_DOCK_OPEN_PX = PROFILE_DOCK_HEADER_PX + PROFILE_DOCK_CHART_PX;
 
+// Show the dock only when there is real analysis to render (a profile, or
+// its loading/error state). Once a launch is set but no viewing spot has
+// been checked, the floating panel's own "Place a viewing spot" caption
+// already carries that message; a thin empty strip along the map's bottom
+// just steals map real estate without adding information.
 export function dockHeightPx(analysis) {
   if (!analysis) return 0;
   if (analysis.observer && analysis.profile) return PROFILE_DOCK_OPEN_PX;
   if (analysis.loading || analysis.fetchError) return PROFILE_DOCK_OPEN_PX;
-  return PROFILE_DOCK_PROMPT_PX;
+  return 0;
 }

@@ -24,7 +24,11 @@ export default function ProfileDock({ isDark }) {
     document.documentElement.style.setProperty(PROFILE_DOCK_HEIGHT_VAR, "0px");
   }, []);
 
+  // Nothing to show yet (no launch, or a launch with no viewing spot picked
+  // and no in-flight analysis) — skip the Paper altogether so it doesn't
+  // paint a hairline against the map for no reason.
   if (!analysis) return null;
+  if (height === 0) return null;
 
   return (
     <Paper
