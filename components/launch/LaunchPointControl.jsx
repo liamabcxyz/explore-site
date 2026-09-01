@@ -11,13 +11,16 @@ import { parseLaunchUrlState, writeLaunchUrlState } from "@/lib/launchUrlState";
 import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
 import { filterBuildingsNearPoint } from "@/lib/geo/buildingsNearPoint";
+import { loadBuildingsAlongCorridor, CORRIDOR_BUFFER_METERS } from "@/lib/geo/corridorBuildings";
 import { findRooftopBase, findBuildingAt } from "@/lib/geo/rooftopBase";
 import { METERS_PER_FLOOR } from "@/lib/geo/normalizeBuilding";
 import { reportViewshedPerf } from "@/lib/perf";
 import { EYE_HEIGHT } from "@/lib/viewshed/scoring";
 import { computeSightlineProfile } from "@/lib/viewshed/computeProfile";
 import { pickTopSpots } from "@/lib/viewshed/pickTopSpots";
-import { loadElevationGridForBounds } from "@/lib/viewshed/ElevationGrid";
+import { loadElevationGridForBounds, loadElevationGridForCorridor, TERRAIN_TILE_ZOOM } from "@/lib/viewshed/ElevationGrid";
+import { tileDistanceSpan } from "@/lib/viewshed/tileWalk";
+import { sightlineMapData } from "@/lib/viewshed/sightlineLayer";
 import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
 
 // 1500m covers the full comfortable viewing ring even for a 12" shell.
@@ -40,6 +43,10 @@ const LAYER_ID = "vantage-viewshed-sectors";
 // effect below.
 const ROOFTOP_SOURCE_ID = "vantage-viewshed-rooftop";
 const ROOFTOP_LAYER_ID = "vantage-viewshed-rooftop-buildings";
+const SIGHTLINE_SOURCE_ID = "vantage-sightline";
+const SIGHTLINE_LAYER_ID = "vantage-sightline-line";
+const BLOCKER_SOURCE_ID = "vantage-sightline-blocker";
+const BLOCKER_LAYER_ID = "vantage-sightline-blocker-fill";
 
 // Legend entries, in the same visual order as the paint expression above so
 // a reader glancing between panel and map matches them by row position, not
@@ -244,6 +251,7 @@ export default function LaunchPointControl() {
   );
   const setViewerLevel = launchAnalysis?.setViewerLevel;
   const [placing, setPlacing] = useState(false);
+  const [placingObserver, setPlacingObserver] = useState(false);
   const [launch, setLaunch] = useState(() => urlInitialState.launch ?? null);
   // Caliber drives both burst height and shell radius (烟花可视性数学模型.md
   // §1.4) — no manual override of the derived values, since letting a user
@@ -277,6 +285,7 @@ export default function LaunchPointControl() {
   const markerRef = useRef(null);
   const observerMarkerRef = useRef(null);
   const placingRef = useRef(placing);
+  const placingObserverRef = useRef(placingObserver);
   const workerRef = useRef(null);
   const hiddenSourceRef = useRef(null);
   // Latest terrain grid — loaded when a launch point is set, passed to
@@ -314,6 +323,9 @@ export default function LaunchPointControl() {
   useEffect(() => {
     placingRef.current = placing;
   }, [placing]);
+  useEffect(() => {
+    placingObserverRef.current = placingObserver;
+  }, [placingObserver]);
 
   // viewerLevel lives in LaunchProvider's context state (ProfilePanel writes
   // to it), so unlike launch/caliber/etc. we can't seed it via useState. Push
@@ -358,10 +370,10 @@ export default function LaunchPointControl() {
   useEffect(() => {
     if (!setClickCapturePredicate) return;
     setClickCapturePredicate((clickLngLat) =>
-      isVantageClick({ placing, launch, clickLngLat, analysisRadiusMeters: ANALYSIS_RADIUS })
+      isVantageClick({ placing, placingObserver, launch, clickLngLat })
     );
     return () => setClickCapturePredicate(null);
-  }, [setClickCapturePredicate, placing, launch]);
+  }, [setClickCapturePredicate, placing, placingObserver, launch]);
 
   // The actual O(cells x buildings) viewshed math now runs off the main
   // thread (lib/viewshed/worker.js is the same computeViewshed() the grid
@@ -476,6 +488,37 @@ export default function LaunchPointControl() {
           "fill-extrusion-opacity": 0.85,
         },
       });
+
+      if (!map.getSource(SIGHTLINE_SOURCE_ID)) {
+        map.addSource(SIGHTLINE_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addLayer({
+          id: SIGHTLINE_LAYER_ID,
+          type: "line",
+          source: SIGHTLINE_SOURCE_ID,
+          paint: {
+            "line-color": [
+              "match", ["get", "segment"],
+              "blocked", "#d32f2f",
+              "#2e7d32",
+            ],
+            "line-width": 3,
+            "line-opacity": 0.9,
+          },
+        });
+      }
+      if (!map.getSource(BLOCKER_SOURCE_ID)) {
+        map.addSource(BLOCKER_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addLayer({
+          id: BLOCKER_LAYER_ID,
+          type: "line",
+          source: BLOCKER_SOURCE_ID,
+          paint: {
+            "line-color": "#d32f2f",
+            "line-width": 3,
+            "line-opacity": 0.95,
+          },
+        });
+      }
       setSourcesRegistered(true);
     };
     if (map.isStyleLoaded()) setup();
@@ -506,22 +549,17 @@ export default function LaunchPointControl() {
     return () => map.off("click", onClick);
   }, [map]);
 
-  // Click-to-pick an observer point for the profile view — a third
-  // independent listener, active once a launch point exists and we're not
-  // mid-placement. Uses the exact clicked lat/lng rather than requiring a
-  // pixel-perfect hit on a rendered grid dot, and is clamped to the same
-  // radius the grid itself covers so the profile always has queried building
-  // data to work with.
+  // Click-to-pick an observer point for the profile view. Dedicated mode
+  // (placingObserver) rather than "any click inside the heat-map circle" —
+  // far observers live outside that circle, and unbounded click-capture
+  // would steal MapView's feature-inspect. Uses the exact clicked lat/lng.
   useEffect(() => {
     if (!map || !launch) return;
-    const projector = makeLocalProjector(launch.lat, launch.lng);
     const onClick = (e) => {
       if (placingRef.current) return;
-      const { x, y } = projector.toLocal(e.lngLat.lat, e.lngLat.lng);
-      if (Math.hypot(x, y) > ANALYSIS_RADIUS) return;
+      if (!placingObserverRef.current) return;
       setObserver({ lat: e.lngLat.lat, lng: e.lngLat.lng });
-      // A fresh point may not even be on a building — start over rather than
-      // carrying e.g. "rooftop" from whatever the last point was.
+      setPlacingObserver(false);
       if (setViewerLevel) setViewerLevel({ mode: "ground", floor: 1 });
     };
     map.on("click", onClick);
@@ -635,6 +673,8 @@ export default function LaunchPointControl() {
     // the user actually interacts, rather than fighting that load order.
     if (map.getLayer(LAYER_ID)) map.moveLayer(LAYER_ID);
     if (map.getLayer(ROOFTOP_LAYER_ID)) map.moveLayer(ROOFTOP_LAYER_ID);
+    if (map.getLayer(SIGHTLINE_LAYER_ID)) map.moveLayer(SIGHTLINE_LAYER_ID);
+    if (map.getLayer(BLOCKER_LAYER_ID)) map.moveLayer(BLOCKER_LAYER_ID);
 
     if (!launch) {
       map.getSource(SOURCE_ID).setData({ type: "FeatureCollection", features: [] });
@@ -760,38 +800,39 @@ export default function LaunchPointControl() {
   }, [map, launch, caliberHeight, shellRadius, getHiddenSource, sourcesRegistered]);
 
   // Full sightline breakdown for whichever point the user picked, published
-  // to LaunchContext so ProfilePanel (mounted elsewhere, inside SidePanel)
-  // can render it. Re-queries buildings independently rather than sharing
-  // the grid effect above — this is a single cheap query, not worth
-  // restructuring the already-working grid effect to share it. Same hidden
-  // source as the grid effect (not map.querySourceFeatures directly) so an
-  // observer point near the edge of the current viewport still sees every
-  // occluder within ANALYSIS_RADIUS, not just whatever tiles happen to be
-  // loaded on screen.
+  // to LaunchContext so ProfilePanel (mounted in the bottom ProfileDock)
+  // can render it. Inside the heat-map radius this still uses the hidden
+  // MapLibre source (already loaded for the grid). Outside it, a z14 PMTiles
+  // corridor walk fetches only the tiles the observer→launch line crosses —
+  // HiddenBuildingSource.fitBounds of a 20km bbox would zoom out past
+  // building tiles and silently report "nothing in the way."
   useEffect(() => {
     if (!setAnalysis) return;
+    const emptyLines = { type: "FeatureCollection", features: [] };
+    const paintSightline = (obs, profile) => {
+      if (!map) return;
+      const { lines, blocker } = sightlineMapData({ observer: obs, launch, profile });
+      if (map.getSource(SIGHTLINE_SOURCE_ID)) map.getSource(SIGHTLINE_SOURCE_ID).setData(lines);
+      if (map.getSource(BLOCKER_SOURCE_ID)) map.getSource(BLOCKER_SOURCE_ID).setData(blocker);
+    };
+
     if (!launch) {
       setAnalysis(null);
+      paintSightline(null, null);
       return;
     }
     if (!map || !observer) {
       setAnalysis({ launch, targetHeight, shellRadius, caliber, observer: null, observerBuilding: null, profile: null });
+      paintSightline(null, null);
       return;
     }
 
-    const hiddenSource = getHiddenSource();
-    if (!hiddenSource) return;
+    const projector = makeLocalProjector(launch.lat, launch.lng);
+    const { x, y } = projector.toLocal(observer.lat, observer.lng);
+    const distance = Math.hypot(x, y);
+    const useCorridor = distance > ANALYSIS_RADIUS;
 
-    let cancelled = false;
-    hiddenSource.query(launch, ANALYSIS_RADIUS).then(({ buildingFeats, partFeats }) => {
-      if (cancelled) return;
-      const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
-      const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
-
-      // Mirror of the launch-point rooftop check above, but for the other end
-      // of the sightline — if the observer point sits on a building, standing
-      // at ground level isn't the only option. See lib/geo/rooftopBase.js and
-      // todo.md's "observer on a building" item.
+    const finish = (buildings, terrainGrid, coverageGaps) => {
       const building = findBuildingAt(observer, buildings);
       const maxFloors = building ? Math.max(1, Math.round(building.height / METERS_PER_FLOOR)) : 0;
       let observerHeight = EYE_HEIGHT;
@@ -809,23 +850,72 @@ export default function LaunchPointControl() {
         shellRadius,
         buildings,
         observerHeight,
-        // Reuse the terrain grid the grid effect above already fetched
-        // for this launch point (elevationGridRef.current). May be null
-        // if the launch point was just placed and the grid effect hasn't
-        // finished yet — that races cleanly, since computeSightlineProfile
-        // treats null as flat ground and the effect re-runs when the
-        // grid arrives (elevationGridRef updates → next launch/observer
-        // change triggers this again with the latest value).
-        terrainGrid: elevationGridRef.current,
+        terrainGrid,
+        coverageGaps,
       });
 
       const observerBuilding = building ? { ...building, maxFloors } : null;
       setAnalysis({ launch, targetHeight, shellRadius, caliber, observer, observerBuilding, profile });
+      paintSightline(observer, profile);
+    };
+
+    let cancelled = false;
+
+    if (!useCorridor) {
+      const hiddenSource = getHiddenSource();
+      if (!hiddenSource) return;
+      hiddenSource.query(launch, ANALYSIS_RADIUS).then(({ buildingFeats, partFeats }) => {
+        if (cancelled) return;
+        const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
+        const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
+        finish(buildings, elevationGridRef.current, []);
+      });
+      return () => { cancelled = true; };
+    }
+
+    const buildingsUrl = map.getStyle()?.sources?.buildings?.url;
+    if (!buildingsUrl) return;
+
+    setAnalysis((prev) => ({
+      launch, targetHeight, shellRadius, caliber, observer,
+      observerBuilding: prev?.observerBuilding ?? null,
+      profile: prev?.profile ?? null,
+      loading: true,
+    }));
+
+    Promise.all([
+      loadBuildingsAlongCorridor({
+        pmtilesUrl: buildingsUrl,
+        from: observer,
+        to: launch,
+        bufferMeters: CORRIDOR_BUFFER_METERS,
+      }),
+      loadElevationGridForCorridor({
+        from: observer,
+        to: launch,
+        bufferMeters: CORRIDOR_BUFFER_METERS,
+      }).catch((err) => {
+        console.warn("corridor terrain load failed:", err);
+        return { grid: null, missingTiles: [] };
+      }),
+    ]).then(([{ buildings, coverageGaps }, { grid, missingTiles }]) => {
+      if (cancelled) return;
+      const terrainGaps = [];
+      for (const tile of missingTiles) {
+        const span = tileDistanceSpan(tile, observer, launch, TERRAIN_TILE_ZOOM);
+        if (span) terrainGaps.push({ ...span, source: "terrain" });
+      }
+      finish(buildings, grid, [...coverageGaps, ...terrainGaps]);
+    }).catch((err) => {
+      if (cancelled) return;
+      console.error("corridor sightline fetch failed:", err);
+      setAnalysis({
+        launch, targetHeight, shellRadius, caliber, observer,
+        observerBuilding: null, profile: null, loading: false, fetchError: true,
+      });
     });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [map, launch, observer, targetHeight, shellRadius, caliber, viewerLevel, setAnalysis, getHiddenSource]);
 
   return (
@@ -835,7 +925,7 @@ export default function LaunchPointControl() {
       elevation={4}
       sx={{
         position: "fixed",
-        bottom: 24,
+        bottom: "calc(var(--vantage-profile-dock-height, 0px) + 24px)",
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: 1200,
@@ -844,7 +934,10 @@ export default function LaunchPointControl() {
       }}
     >
       <Stack spacing={1.5}>
-        <Button variant={placing ? "contained" : "outlined"} onClick={() => setPlacing((p) => !p)}>
+        <Button variant={placing ? "contained" : "outlined"} onClick={() => {
+          setPlacing((p) => !p);
+          setPlacingObserver(false);
+        }}>
           {placing ? "Click the map to place…" : launch ? "Move launch point" : "Set launch point"}
         </Button>
         {!launch && (
@@ -858,14 +951,26 @@ export default function LaunchPointControl() {
         )}
         {launch && (
           <>
-            {/* Post-placement hint. ProfilePanel (mounted inside SidePanel)
+            {/* Post-placement hint. ProfilePanel (mounted in ProfileDock)
                 is fully wired to render for any observer point, but nothing
                 else in the map UI signals that clicking a spot opens it —
                 users would have to accidentally discover it. Same shape as
                 the empty-state hint above. */}
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              Click any spot in the circle to check what&apos;s visible from there.
+              {placingObserver
+                ? "Click anywhere on the map to check visibility from that spot."
+                : "Place a viewing spot — inside the circle or kilometers away."}
             </Typography>
+            <Button
+              variant={placingObserver ? "contained" : "outlined"}
+              size="small"
+              onClick={() => {
+                setPlacingObserver((p) => !p);
+                setPlacing(false);
+              }}
+            >
+              {placingObserver ? "Click the map…" : observer ? "Move viewing spot" : "Check a viewing spot"}
+            </Button>
             <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
               <Typography variant="caption">
                 Caliber: {caliber}&quot; · burst ~{Math.round(targetHeight)}m

@@ -147,4 +147,33 @@ describe("computeSightlineProfile", () => {
     expect(elevated.frac).toBe(1);
     expect(elevated.eyeHeight).toBe(65);
   });
+
+  it("flags coverage gaps without changing a clear geometric result", () => {
+    const result = computeSightlineProfile({
+      observer,
+      launch,
+      targetHeight: 100,
+      shellRadius: 20,
+      buildings: [],
+      coverageGaps: [{ fromMeters: 20, toMeters: 40, source: "buildings" }],
+    });
+    expect(result.frac).toBe(1);
+    expect(result.dataIncomplete).toBe(true);
+    expect(result.coverageGaps).toHaveLength(1);
+  });
+
+  it("lowers the apparent target altitude at 20km via curvature", () => {
+    const far = { lat: 0, lng: 20_000 / METERS_PER_DEGREE };
+    const mid = squareBuilding(9_990, 10_010, 40);
+    const curved = computeSightlineProfile({
+      observer: far,
+      launch,
+      targetHeight: 90,
+      shellRadius: 10,
+      buildings: [mid],
+    });
+    expect(curved.totalDistance).toBeCloseTo(20_000, 0);
+    expect(curved.hits).toHaveLength(1);
+    expect(curved.targetApparentAlt).toBeLessThan(90);
+  });
 });

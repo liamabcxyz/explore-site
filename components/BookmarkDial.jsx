@@ -72,7 +72,7 @@ export default function BookmarkDial({ mode }) {
   };
 
   return (
-    <div style={{ position: 'fixed', bottom: 24, left: 24, zIndex: 1000 }}>
+    <div style={{ position: 'fixed', bottom: 'calc(var(--vantage-profile-dock-height, 0px) + 24px)', left: 24, zIndex: 1000 }}>
       {BOOKMARKS.map((bookmark, i) => {
         const pos = getArcPosition(ANGLES[i]);
         return (

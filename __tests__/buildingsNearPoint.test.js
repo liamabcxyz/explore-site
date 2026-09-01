@@ -1,4 +1,4 @@
-import { filterBuildingsNearPoint } from "@/lib/geo/buildingsNearPoint";
+import { filterBuildingsNearPoint, filterBuildingsNearSegment } from "@/lib/geo/buildingsNearPoint";
 
 const METERS_PER_DEGREE = 111320;
 const point = { lat: 0, lng: 0 };
@@ -48,5 +48,28 @@ describe("filterBuildingsNearPoint", () => {
     const near = squareAt(10, 20, 10, 20);
     const far = squareAt(1000, 1010, -5, 5);
     expect(filterBuildingsNearPoint([near, far], point, 500)).toEqual([near]);
+  });
+});
+
+describe("filterBuildingsNearSegment", () => {
+  const from = { lat: 0, lng: 0 };
+  const to = { lat: 0, lng: 1000 / METERS_PER_DEGREE }; // 1km east
+
+  it("keeps a building sitting on the segment", () => {
+    const onLine = squareAt(400, 420, -5, 5);
+    expect(filterBuildingsNearSegment([onLine], from, to, 50)).toEqual([onLine]);
+  });
+
+  it("drops a building far off to the side", () => {
+    const off = squareAt(400, 420, 400, 420);
+    expect(filterBuildingsNearSegment([off], from, to, 50)).toEqual([]);
+  });
+
+  it("keeps a building the segment crosses through the middle of, even if vertices are outside the buffer", () => {
+    // 200m-wide warehouse centered on the line, vertices 100m off-axis.
+    // Buffer 50 + margin 50 = 100m — vertices sit on the boundary; the
+    // inflated-bbox test is what must catch a slightly wider case.
+    const wide = squareAt(400, 500, -120, 120);
+    expect(filterBuildingsNearSegment([wide], from, to, 50)).toEqual([wide]);
   });
 });

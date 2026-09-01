@@ -42,6 +42,11 @@ describe("normalizeBuilding", () => {
     expect(result.height).toBe(10);
     expect(result.confidence).toBe("low");
   });
+
+  it("reads @name onto the normalized building", () => {
+    const result = normalizeBuilding({ height: 42, "@name": "Transamerica Pyramid" }, footprint);
+    expect(result.name).toBe("Transamerica Pyramid");
+  });
 });
 
 describe("selectOccludingFeatures", () => {

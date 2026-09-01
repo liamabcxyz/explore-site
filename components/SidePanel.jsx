@@ -13,7 +13,7 @@ const DRAWER_WIDTH = 340;
 // the raw layer-tree editor. Same pattern the compare-slider disable
 // (components/MapView.jsx) uses, for the same reason: keep the code
 // intact so it's cheap to bring back.
-const ENABLE_LAYER_TABS = false;
+export const ENABLE_LAYER_TABS = false;
 
 export default function SidePanel({
   mode,
@@ -130,11 +130,10 @@ export default function SidePanel({
           </Tabs>
         )}
 
-        {/* Tab content — with ENABLE_LAYER_TABS off, VANTAGE only ever
-            wants the ProfilePanel view, so skip the activeTab dispatch
-            entirely and render it directly. */}
+        {/* Tab content. ProfilePanel's default product path is the bottom
+            ProfileDock (see MapView); this drawer only hosts it when the
+            layer-editor tabs are back on. */}
         <Box sx={{ overflow: "auto", flex: 1 }}>
-          {!ENABLE_LAYER_TABS && <ProfilePanel isDark={isDark} />}
           {ENABLE_LAYER_TABS && activeTab === "layers" && (
             <LayerTree
               visibleTypes={visibleTypes}

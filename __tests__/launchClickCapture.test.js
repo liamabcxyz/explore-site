@@ -14,7 +14,6 @@ describe("isVantageClick", () => {
         placing: true,
         launch: null,
         clickLngLat: offsetBy(10000, 0),
-        analysisRadiusMeters: 1500,
       })
     ).toBe(true);
   });
@@ -25,44 +24,40 @@ describe("isVantageClick", () => {
         placing: false,
         launch: null,
         clickLngLat: { lng: launch.lng, lat: launch.lat },
-        analysisRadiusMeters: 1500,
       })
     ).toBe(false);
   });
 
-  it("captures observer picks inside the analysis radius once a launch point exists", () => {
+  it("does not capture in-radius clicks unless observer-place mode is on", () => {
     expect(
       isVantageClick({
         placing: false,
+        placingObserver: false,
         launch,
         clickLngLat: offsetBy(500, 0),
-        analysisRadiusMeters: 1500,
-      })
-    ).toBe(true);
-  });
-
-  it("leaves clicks outside the radius alone (feature-inspect stays available there)", () => {
-    expect(
-      isVantageClick({
-        placing: false,
-        launch,
-        clickLngLat: offsetBy(2000, 0),
-        analysisRadiusMeters: 1500,
       })
     ).toBe(false);
   });
 
-  it("captures a boundary click (right at the radius)", () => {
-    // Mirror of LaunchPointControl.jsx's own observer-click guard —
-    // `Math.hypot(x, y) > ANALYSIS_RADIUS` is the exclusion, so exactly
-    // equal is still consumed.
+  it("captures observer picks anywhere once place-observer mode is on", () => {
     expect(
       isVantageClick({
         placing: false,
+        placingObserver: true,
         launch,
-        clickLngLat: offsetBy(1500, 0),
-        analysisRadiusMeters: 1500,
+        clickLngLat: offsetBy(20000, 0),
       })
     ).toBe(true);
+  });
+
+  it("leaves map clicks alone when a launch exists but nobody is placing", () => {
+    expect(
+      isVantageClick({
+        placing: false,
+        placingObserver: false,
+        launch,
+        clickLngLat: offsetBy(2000, 0),
+      })
+    ).toBe(false);
   });
 });

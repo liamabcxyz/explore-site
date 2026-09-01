@@ -4,7 +4,8 @@ import * as maplibregl from "maplibre-gl";
 import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
 import "@/components/CustomControls.css";
-import SidePanel from "@/components/SidePanel";
+import SidePanel, { ENABLE_LAYER_TABS } from "@/components/SidePanel";
+import ProfileDock from "@/components/analysis/ProfileDock";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import BookmarkDial from "@/components/BookmarkDial";
 import FeaturePopup from "@/components/FeatureSelector";
@@ -124,13 +125,12 @@ export default function Map({
 
   const [lastClickedCoords, setLastClickedCoords] = useState();
 
-  // Surface the profile view automatically whenever the user picks a new
-  // observer point on the map — otherwise there's nothing telling them the
-  // analysis landed anywhere. Purely additive: reacts to LaunchContext, calls
-  // the same setters the click handler below already owns, and never touches
-  // that handler's own logic.
+  // With layer tabs on, surface the Features drawer when a new observer is
+  // picked. The default VANTAGE path uses ProfileDock at the bottom of the
+  // page instead, so opening the left drawer would be a no-op.
   const launchAnalysis = useLaunchAnalysis();
   useEffect(() => {
+    if (!ENABLE_LAYER_TABS) return;
     if (launchAnalysis?.analysis?.observer) {
       setActiveTab("features");
       setDrawerOpen(true);
@@ -256,7 +256,7 @@ export default function Map({
     // Click handler
     map.on("click", (e) => {
       // Defer to the launch flow when it's consuming this click (placing a
-      // launch point, or picking an observer inside the analysis radius) —
+      // launch point, or picking an observer in place-observer mode) —
       // otherwise the feature-inspect panel pops on whatever building sat
       // under the click, on top of the launch/observer marker the user
       // actually meant to drop. See lib/launchClickCapture.js and
@@ -294,8 +294,10 @@ export default function Map({
         setClickedMap(targetMap);
         setFeatures(clickedFeatures);
         setActiveFeature(clickedFeatures[0]);
-        setActiveTab("features");
-        setDrawerOpen(true);
+        if (ENABLE_LAYER_TABS) {
+          setActiveTab("features");
+          setDrawerOpen(true);
+        }
       } else {
         setLastClickedCoords(null);
         setFeatures([]);
@@ -507,8 +509,10 @@ export default function Map({
     function resolve(match) {
       setActiveFeature(match);
       setFeatures([match]);
-      setActiveTab("features");
-      setDrawerOpen(true);
+      if (ENABLE_LAYER_TABS) {
+        setActiveTab("features");
+        setDrawerOpen(true);
+      }
       setPendingFeature(null);
     }
 
@@ -551,15 +555,37 @@ export default function Map({
     }
   }, [globeMode, mapLoaded]);
 
-  // Resize maps when drawer opens/closes
+  // Resize maps when the left drawer opens/closes. The bottom dock keeps a
+  // fixed height while a profile is on screen, so analysis updates must not
+  // call map.resize() — that flashes the WebGL canvas.
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!ENABLE_LAYER_TABS || !mapRef.current) return;
     const timer = setTimeout(() => {
       mapRef.current?.resize();
       inspectMapRef.current?.resize();
     }, 250);
     return () => clearTimeout(timer);
   }, [drawerOpen]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return undefined;
+    let lastW = -1;
+    let lastH = -1;
+    const resize = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w === lastW && h === lastH) return;
+      lastW = w;
+      lastH = h;
+      mapRef.current?.resize();
+      inspectMapRef.current?.resize();
+    };
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(resize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [mapLoaded]);
 
   // Divider drag handlers
   const handleDividerStart = useCallback((e) => {
@@ -603,9 +629,11 @@ export default function Map({
           style={{
             position: "fixed",
             top: 60,
-            left: drawerOpen ? 340 : 0,
-            width: drawerOpen ? "calc(100% - 340px)" : "100%",
-            height: "calc(100vh - 60px)",
+            left: ENABLE_LAYER_TABS && drawerOpen ? 340 : 0,
+            width: ENABLE_LAYER_TABS && drawerOpen ? "calc(100% - 340px)" : "100%",
+            height: ENABLE_LAYER_TABS
+              ? "calc(100vh - 60px)"
+              : "calc(100vh - 60px - var(--vantage-profile-dock-height, 0px))",
             transition: "left 225ms cubic-bezier(0,0,0.2,1), width 225ms cubic-bezier(0,0,0.2,1)",
             userSelect: dragging ? "none" : undefined,
           }}
@@ -741,24 +769,28 @@ export default function Map({
           <BookmarkDial mode={mode} />
         </div>
 
-        <SidePanel
-          mode={mode}
-          drawerOpen={drawerOpen}
-          setDrawerOpen={setDrawerOpen}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          visibleTypes={visibleTypes}
-          setVisibleTypes={setVisibleTypes}
-          defaultVisibleTypes={defaultVisibleTypes}
-          inspectVisibleTypes={inspectVisibleTypes}
-          setInspectVisibleTypes={setInspectVisibleTypes}
-          defaultInspectVisibleTypes={defaultInspectVisibleTypes}
-          zoom={zoom}
-          features={features}
-          setFeatures={setFeatures}
-          activeFeature={activeFeature}
-          setActiveFeature={setActiveFeature}
-        />
+        {ENABLE_LAYER_TABS ? (
+          <SidePanel
+            mode={mode}
+            drawerOpen={drawerOpen}
+            setDrawerOpen={setDrawerOpen}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            visibleTypes={visibleTypes}
+            setVisibleTypes={setVisibleTypes}
+            defaultVisibleTypes={defaultVisibleTypes}
+            inspectVisibleTypes={inspectVisibleTypes}
+            setInspectVisibleTypes={setInspectVisibleTypes}
+            defaultInspectVisibleTypes={defaultInspectVisibleTypes}
+            zoom={zoom}
+            features={features}
+            setFeatures={setFeatures}
+            activeFeature={activeFeature}
+            setActiveFeature={setActiveFeature}
+          />
+        ) : (
+          <ProfileDock isDark={mode === "theme-dark"} />
+        )}
       </div>
     </>
   );

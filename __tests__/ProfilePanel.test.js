@@ -32,7 +32,7 @@ describe("ProfilePanel", () => {
       observer: null,
       profile: null,
     });
-    screen.getByText("Click anywhere on the map to see whether that spot can see the launch.");
+    screen.getByText("Use “Check a viewing spot”, then click anywhere on the map.");
   });
 
   it("renders the fully-visible verdict and chart when nothing blocks the sightline", () => {
@@ -229,5 +229,40 @@ describe("ProfilePanel", () => {
       { viewerLevel: { mode: "floor", floor: 4 }, setViewerLevel: () => {} }
     );
     screen.getByText("Floor 4 of ~20");
+  });
+
+  it("renders a wider chart when laid out as the bottom dock", () => {
+    const { container } = render(
+      <LaunchContext.Provider
+        value={{
+          analysis: {
+            launch: { lat: 37.79, lng: -122.4 },
+            targetHeight: 100,
+            shellRadius: 20,
+            observer: { lat: 37.791, lng: -122.401 },
+            profile: {
+              totalDistance: 120,
+              eyeHeight: 1.6,
+              targetHeight: 100,
+              shellRadius: 20,
+              minAlt: -Infinity,
+              frac: 1,
+              theta: 14.6874,
+              phi: 39.3518,
+              score: 1,
+              category: "good",
+              hits: [],
+            },
+          },
+          setClickCapturePredicate: () => {},
+          isVantageClickAt: () => false,
+        }}
+      >
+        <ProfilePanel isDark={false} layout="dock" />
+      </LaunchContext.Provider>
+    );
+    const svg = container.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(Number(svg.getAttribute("width"))).toBeGreaterThanOrEqual(320);
   });
 });

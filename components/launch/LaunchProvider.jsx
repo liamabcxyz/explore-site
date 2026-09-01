@@ -21,7 +21,7 @@ import LaunchContext from "@/lib/LaunchContext";
 // callers from mutating a ref they receive from context, so the mutation
 // stays where the ref was constructed). MapView.jsx's own click handler
 // then calls isVantageClickAt and early-returns for those clicks, so a
-// launch-point placement (or an in-radius observer pick) doesn't also pop
+// launch-point placement (or an observer pick in place-observer mode) doesn't also pop
 // MapView's feature-inspect panel on whatever building sat under the
 // click. Both setter and reader are stable useCallback values so the
 // consumers don't re-run on every render.
