@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
-import { Box, Paper, Button, Typography, Slider, Stack, Switch, FormControlLabel } from "@mui/material";
+import { Box, Paper, Button, Typography, Slider, Stack, Switch, FormControlLabel, Menu, MenuItem } from "@mui/material";
 import { useMapInstance } from "@/lib/MapContext";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import { createHiddenBuildingSource } from "@/lib/HiddenBuildingSource";
@@ -22,6 +22,7 @@ import { loadElevationGridForBounds, loadElevationGridForCorridor, TERRAIN_TILE_
 import { tileDistanceSpan } from "@/lib/viewshed/tileWalk";
 import { sightlineMapData } from "@/lib/viewshed/sightlineLayer";
 import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
+import { FIREWORKS_PRESETS } from "@/lib/fireworksPresets";
 
 // 1500m covers the full comfortable viewing ring even for a 12" shell.
 // Was dropped to 500m as a stopgap while placing a launch point froze the
@@ -252,6 +253,7 @@ export default function LaunchPointControl() {
   const setViewerLevel = launchAnalysis?.setViewerLevel;
   const [placing, setPlacing] = useState(false);
   const [placingObserver, setPlacingObserver] = useState(false);
+  const [presetMenuAnchor, setPresetMenuAnchor] = useState(null);
   const [launch, setLaunch] = useState(() => urlInitialState.launch ?? null);
   // Caliber drives both burst height and shell radius (烟花可视性数学模型.md
   // §1.4) — no manual override of the derived values, since letting a user
@@ -401,6 +403,28 @@ export default function LaunchPointControl() {
         hiddenSourceRef.current = null;
       }
     };
+  }, [map]);
+
+  // Selecting a preset fires the launch at its coordinates + caliber, kills
+  // any in-flight placing mode, plays the celebratory firework animation,
+  // and flies the map to the show's location. It intentionally leaves the
+  // observer alone — pick-a-real-show is about seeing the launch on the
+  // map, then the user decides where they'd watch from.
+  const applyPreset = useCallback((preset) => {
+    setPresetMenuAnchor(null);
+    setLaunch({ lat: preset.lat, lng: preset.lng });
+    setCaliber(preset.caliber);
+    setPlacing(false);
+    setPlacingObserver(false);
+    setObserver(null);
+    setFireworkPlayCount((n) => n + 1);
+    if (map) {
+      map.flyTo({
+        center: [preset.lng, preset.lat],
+        zoom: preset.zoom ?? 14,
+        speed: 1.6,
+      });
+    }
   }, [map]);
 
   const getHiddenSource = useCallback(() => {
@@ -950,6 +974,38 @@ export default function LaunchPointControl() {
         }}>
           {placing ? "Click the map to place…" : launch ? "Move launch point" : "Set launch point"}
         </Button>
+        <Button
+          size="small"
+          variant="text"
+          onClick={(e) => setPresetMenuAnchor(e.currentTarget)}
+          endIcon={<Box component="span" sx={{ fontSize: 11 }}>▾</Box>}
+          sx={{ textTransform: "none", justifyContent: "center", color: "text.secondary", py: 0.25 }}
+        >
+          🎆 Or load a real show
+        </Button>
+        <Menu
+          anchorEl={presetMenuAnchor}
+          open={Boolean(presetMenuAnchor)}
+          onClose={() => setPresetMenuAnchor(null)}
+          slotProps={{ paper: { sx: { maxHeight: 420, width: 300 } } }}
+        >
+          {FIREWORKS_PRESETS.map((preset) => (
+            <MenuItem
+              key={preset.id}
+              onClick={() => applyPreset(preset)}
+              sx={{ py: 1, alignItems: "flex-start" }}
+            >
+              <Stack sx={{ minWidth: 0 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {preset.name}
+                </Typography>
+                <Typography variant="caption" sx={{ color: "text.secondary", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {preset.city} · {preset.caliber}&quot; shells
+                </Typography>
+              </Stack>
+            </MenuItem>
+          ))}
+        </Menu>
         {!launch && (
           // Empty-state hint. The landing page (app/page.jsx) explains the
           // app once; once the user's on the map, the button label alone
