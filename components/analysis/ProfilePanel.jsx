@@ -64,7 +64,6 @@ const PAD_LEFT = 40;
 const PAD_RIGHT = 12;
 const PAD_TOP = 14;
 const PAD_BOTTOM = 22;
-const HORIZON_CHART_METERS = 2500;
 const HAZE_HINT_METERS = 10000;
 
 function plotSize(width, height) {
@@ -76,145 +75,8 @@ function plotSize(width, height) {
   };
 }
 
-function SightlineChart({ profile, isDark, width = DEFAULT_CHART_WIDTH, height = DEFAULT_CHART_HEIGHT }) {
-  const { width: W, height: H, plotWidth, plotHeight } = plotSize(width, height);
-  const {
-    totalDistance, eyeHeight, targetHeight, shellRadius, frac, hits,
-  } = profile;
-  // Phase 5 added the absolute-altitude fields and terrainProfile.
-  // Older callers (and pre-Phase-5 tests) hand us the pre-Phase-5 shape;
-  // fall back so the chart renders identically to before in that case
-  // (relative altitudes with a flat, empty terrain).
-  const observerGroundElev = profile.observerGroundElev ?? 0;
-  const launchElev = profile.launchElev ?? 0;
-  const observerAbsAlt = profile.observerAbsAlt ?? eyeHeight;
-  const targetAbsAlt = profile.targetAbsAlt ?? targetHeight;
-  const terrainProfile = profile.terrainProfile ?? [];
-
-  // Everything plotted on one absolute-altitude axis, so buildings
-  // (whose height is absolute post-Phase-3) sit next to observer eye
-  // (observerAbsAlt) and burst (targetAbsAlt) at consistent altitude
-  // even in hilly terrain. Pre-Phase-3 code path (no terrain) has
-  // observerGroundElev = launchElev = 0, so this collapses to the old
-  // "everything relative to sea level = same as relative to ground"
-  // behavior automatically.
-  const bandTop = targetAbsAlt + shellRadius;
-  const bandBottom = targetAbsAlt - shellRadius;
-  const maxHitHeight = hits.reduce((m, h) => Math.max(m, h.height), 0);
-  const maxTerrainElev = terrainProfile.reduce((m, s) => Math.max(m, s.elevation), 0);
-  const maxY = Math.max(bandTop, maxHitHeight, observerAbsAlt, maxTerrainElev) * 1.1;
-  // With terrain, the chart may want a floor below 0 (e.g., burst near
-  // sea level, terrain higher). For now stick with 0 baseline — the SF
-  // case has everything ≥ 0m ASL and adjusting per-analysis would
-  // introduce chart jitter across nearby launches.
-  const minY = 0;
-
-  const ink = isDark ? "#c3c2b7" : "#52514e";
-  const baseline = isDark ? "#383835" : "#c3c2b7";
-  const terrainFill = isDark ? "#5c4a38" : "#d4c3a8";
-  const nonBlockingFill = "#898781";
-  const blockColor = verdictColor(frac);
-
-  const xAt = (distance) => PAD_LEFT + (distance / totalDistance) * plotWidth;
-  const yAt = (h) => PAD_TOP + plotHeight - ((h - minY) / (maxY - minY)) * plotHeight;
-
-  const bottomY = yAt(minY);
-  const blockerReq = hits.length > 0 ? Math.max(...hits.map((h) => h.req)) : null;
-
-  // Terrain silhouette: closed polygon that traces the ground profile,
-  // closing at the chart's bottom line. Renders first so buildings and
-  // sightline overlay it. When terrainGrid is absent, all elevations
-  // are 0 and the polygon collapses to a flat strip along the x-axis —
-  // visually indistinguishable from the ground line we already drew,
-  // so no special-case needed.
-  const terrainPath = (() => {
-    if (terrainProfile.length < 2) return "";
-    const pts = terrainProfile.map((s) => `${xAt(s.distance).toFixed(2)},${yAt(s.elevation).toFixed(2)}`).join(" L ");
-    return `M ${xAt(0).toFixed(2)},${bottomY.toFixed(2)} L ${pts} L ${xAt(totalDistance).toFixed(2)},${bottomY.toFixed(2)} Z`;
-  })();
-
-  return (
-    <svg width={W} height={H} role="img" aria-label={`Sightline profile, ${Math.round(frac * 100)}% visible`}>
-      {/* terrain silhouette (drawn first so buildings and sightline sit on top) */}
-      {terrainPath && <path d={terrainPath} fill={terrainFill} opacity={0.55} />}
-
-      {/* ground reference line at sea level */}
-      <line x1={PAD_LEFT} y1={bottomY} x2={W - PAD_RIGHT} y2={bottomY} stroke={baseline} strokeWidth={1} />
-
-      {/* the building the observer is standing on, if eyeHeight is elevated
-          above just standing at ground level — otherwise "you" would read as
-          floating in midair with nothing under it. eyeHeight is the RELATIVE
-          input value (meters above local ground) so the comparison against
-          the raw EYE_HEIGHT constant still works regardless of terrain. */}
-      {eyeHeight > EYE_HEIGHT + 0.5 && (
-        <rect
-          x={xAt(0) - Math.max(4, plotWidth * 0.012) / 2}
-          y={yAt(observerAbsAlt)}
-          width={Math.max(4, plotWidth * 0.012)}
-          height={yAt(observerGroundElev) - yAt(observerAbsAlt)}
-          fill={nonBlockingFill}
-          opacity={0.4}
-        />
-      )}
-
-      {/* buildings */}
-      {hits.map((hit, i) => {
-        const isBlocker = hit.req === blockerReq;
-        const x = xAt(hit.distance);
-        const barWidth = Math.max(4, plotWidth * 0.01);
-        // Building base: sample terrain at hit.distance (interpolated
-        // from terrainProfile) so bars stand on the ground silhouette
-        // rather than floating above/below it. Fall back to sea level
-        // when terrain isn't loaded — cosmetically same as pre-Phase-5.
-        const baseElev = interpolateTerrain(terrainProfile, hit.distance);
-        return (
-          <rect
-            key={i}
-            x={x - barWidth / 2}
-            y={yAt(hit.height)}
-            width={barWidth}
-            height={yAt(baseElev) - yAt(hit.height)}
-            fill={isBlocker ? blockColor : nonBlockingFill}
-            opacity={isBlocker ? 0.9 : 0.6}
-          >
-            <title>{`${Math.round(hit.height)}m building (${hit.confidence} confidence), ${Math.round(hit.distance)}m from you`}</title>
-          </rect>
-        );
-      })}
-
-      {/* sightline, drawn after the buildings so a tall blocker visually cuts it off */}
-      <line
-        x1={xAt(0)}
-        y1={yAt(observerAbsAlt)}
-        x2={xAt(totalDistance)}
-        y2={yAt(targetAbsAlt)}
-        stroke={isDark ? "#3987e5" : "#2a78d6"}
-        strokeWidth={2}
-      />
-
-      {/* firework shell band at the launch point */}
-      <rect
-        x={xAt(totalDistance) - 5}
-        y={yAt(bandTop)}
-        width={10}
-        height={yAt(bandBottom) - yAt(bandTop)}
-        fill={verdictColor(frac)}
-        opacity={0.25}
-      />
-      <circle cx={xAt(totalDistance)} cy={yAt(targetAbsAlt)} r={3} fill={verdictColor(frac)} />
-
-      {/* axis labels */}
-      <text x={PAD_LEFT} y={H - 4} fontSize={10} fill={ink}>you</text>
-      <text x={W - PAD_RIGHT} y={H - 4} fontSize={10} textAnchor="end" fill={ink}>launch point</text>
-      <text x={4} y={PAD_TOP + 8} fontSize={10} fill={ink}>{Math.round(maxY)}m</text>
-      <text x={4} y={bottomY} fontSize={10} fill={ink}>{Math.round(minY)}m</text>
-    </svg>
-  );
-}
-
-// Simple piecewise-linear lookup on the terrainProfile samples. Called for
-// building bases so bars stand on the drawn ground silhouette instead of
-// floating.
+// Piecewise-linear lookup on the terrainProfile samples. Building bars stand
+// on the interpolated ground rather than floating.
 function interpolateTerrain(profile, distance) {
   if (profile.length === 0) return 0;
   if (distance <= profile[0].distance) return profile[0].elevation;
@@ -230,40 +92,61 @@ function interpolateTerrain(profile, distance) {
   return 0;
 }
 
-function elevAngleDeg(aslMeters, distance, observerAbsAlt) {
-  if (!(distance > 0)) return 0;
-  return Math.atan2(apparentAltitude(aslMeters, distance) - observerAbsAlt, distance) * (180 / Math.PI);
-}
-
-function HorizonChart({ profile, isDark, width = DEFAULT_CHART_WIDTH, height = DEFAULT_CHART_HEIGHT }) {
+/**
+ * One chart for every observer→launch distance, from 20m to 30km. Y is the
+ * elevation angle from the observer's eye (degrees), so a 100m ridge 500m
+ * away and a 100m ridge 5km away render at the visual size they'd actually
+ * take up in the viewer's field of vision — matching human perception and
+ * automatically down-weighting distant obstacles the way the old absolute-
+ * meters chart couldn't. X is √distance so near buildings (where individual
+ * bar identity matters most) get more pixels than far ones (where they'd
+ * blur into a hairline band anyway). See
+ * `自由放置观察点与远距离剖面图_工程设计文档.md` §4.
+ *
+ * Buildings render as thin per-hit bars — at close range each one stands
+ * on its own, at far range they overlay into a natural urban-skyline
+ * silhouette. The single blocker (max-req hit) gets its own wider,
+ * verdict-colored bar drawn on top, so "why is this blocked" reads at a
+ * glance instead of hunting through 300 similar-looking bars.
+ */
+function SkylineChart({ profile, isDark, width = DEFAULT_CHART_WIDTH, height = DEFAULT_CHART_HEIGHT }) {
   const { width: W, height: H, plotWidth, plotHeight } = plotSize(width, height);
-  const {
-    totalDistance, observerAbsAlt, targetApparentAlt, shellRadius, frac, hits, phi, terrainProfile,
-  } = profile;
-  const observerAlt = observerAbsAlt ?? profile.eyeHeight ?? EYE_HEIGHT;
-  const targetAlt = targetApparentAlt ?? profile.targetAbsAlt ?? profile.targetHeight;
-  const terrain = terrainProfile ?? [];
+  const { totalDistance, shellRadius, frac, hits, phi } = profile;
+  // Phase 5 shape fields; pre-Phase-5 tests hand us the old shape, so fall
+  // back the same way the previous two charts did.
+  const observerAlt = profile.observerAbsAlt ?? profile.eyeHeight ?? EYE_HEIGHT;
+  const targetAlt = profile.targetAbsAlt ?? profile.targetHeight;
+  const terrain = profile.terrainProfile ?? [];
 
-  const shellTop = elevAngleDeg(targetAlt + shellRadius, totalDistance, observerAlt);
-  const shellBot = elevAngleDeg(targetAlt - shellRadius, totalDistance, observerAlt);
-  const sightline = typeof phi === "number" ? phi : elevAngleDeg(targetAlt, totalDistance, observerAlt);
+  // Elevation angle from observer eye to (distance, absAlt), curvature/
+  // refraction applied on the far side. Angle is degrees, positive = above
+  // horizon.
+  const angleAt = (absAlt, distance) => {
+    if (!(distance > 0)) return 0;
+    return Math.atan2(apparentAltitude(absAlt, distance) - observerAlt, distance) * (180 / Math.PI);
+  };
 
-  const terrainAngles = terrain.map((s) => elevAngleDeg(s.elevation, s.distance, observerAlt));
-  const hitAngles = hits.map((h) => elevAngleDeg(h.height, h.distance, observerAlt));
+  const shellTop = angleAt(targetAlt + shellRadius, totalDistance);
+  const shellBot = angleAt(targetAlt - shellRadius, totalDistance);
+  const sightline = typeof phi === "number" ? phi : angleAt(targetAlt, totalDistance);
+
+  const hitAngles = hits.map((h) => angleAt(h.height, h.distance));
+  const hitGroundAngles = hits.map((h) => angleAt(interpolateTerrain(terrain, h.distance), h.distance));
+  const terrainAngles = terrain.map((s) => angleAt(s.elevation, s.distance));
+
   const maxY = Math.max(shellTop, sightline, ...hitAngles, ...terrainAngles, 1);
-  const minY = Math.min(shellBot, ...terrainAngles, 0);
+  const minY = Math.min(shellBot, ...hitGroundAngles, ...terrainAngles, 0);
   const span = Math.max(1e-3, maxY - minY);
 
   const ink = isDark ? "#c3c2b7" : "#52514e";
   const baseline = isDark ? "#383835" : "#c3c2b7";
   const terrainFill = isDark ? "#5c4a38" : "#d4c3a8";
+  const skylineFill = isDark ? "#8a8781" : "#8a8781";
   const blockColor = verdictColor(frac);
 
   const xAt = (distance) => PAD_LEFT + (Math.sqrt(Math.max(0, distance)) / Math.sqrt(totalDistance)) * plotWidth;
   const yAt = (deg) => PAD_TOP + plotHeight - ((deg - minY) / span) * plotHeight;
-
   const bottomY = yAt(minY);
-  const blockerReq = hits.length > 0 ? Math.max(...hits.map((h) => h.req)) : null;
 
   const terrainPath = (() => {
     if (terrain.length < 2) return "";
@@ -271,41 +154,83 @@ function HorizonChart({ profile, isDark, width = DEFAULT_CHART_WIDTH, height = D
     return `M ${xAt(0).toFixed(2)},${bottomY.toFixed(2)} L ${pts} L ${xAt(totalDistance).toFixed(2)},${bottomY.toFixed(2)} Z`;
   })();
 
+  // Blocker: the tallest-req hit gets a distinct verdict-colored bar drawn
+  // on top with a minimum pixel width so it stays visible even 20km out.
+  const blockerIdx = hits.length > 0
+    ? hits.reduce((best, h, i) => (h.req > hits[best].req ? i : best), 0)
+    : -1;
+
   return (
-    <svg width={W} height={H} role="img" aria-label={`Horizon profile, ${Math.round(frac * 100)}% visible`}>
+    <svg width={W} height={H} role="img" aria-label={`Sightline profile, ${Math.round(frac * 100)}% visible`}>
+      {/* terrain silhouette */}
       {terrainPath && <path d={terrainPath} fill={terrainFill} opacity={0.55} />}
-      <line x1={PAD_LEFT} y1={yAt(sightline)} x2={W - PAD_RIGHT} y2={yAt(sightline)} stroke={isDark ? "#3987e5" : "#2a78d6"} strokeWidth={2} />
+
+      {/* shell band spans the whole viewport at the launch's angular height */}
       <rect
         x={PAD_LEFT}
         y={yAt(shellTop)}
         width={plotWidth}
         height={Math.max(1, yAt(shellBot) - yAt(shellTop))}
         fill={blockColor}
-        opacity={0.12}
+        opacity={0.14}
       />
+
+      {/* buildings — one thin bar per hit. Sub-pixel bars in the distance
+          overlay into a natural urban-skyline silhouette; the near ones
+          stand on their own. */}
       {hits.map((hit, i) => {
-        const isBlocker = hit.req === blockerReq;
+        if (i === blockerIdx) return null;
         const x = xAt(hit.distance);
-        const ground = elevAngleDeg(
-          interpolateTerrain(terrain, hit.distance),
-          hit.distance,
-          observerAlt,
-        );
+        const topY = yAt(hitAngles[i]);
+        const botY = yAt(hitGroundAngles[i]);
         return (
-          <line
+          <rect
             key={i}
-            x1={x}
-            y1={yAt(ground)}
-            x2={x}
-            y2={yAt(hitAngles[i])}
-            stroke={isBlocker ? blockColor : "#898781"}
-            strokeWidth={isBlocker ? 3 : 2}
-            opacity={isBlocker ? 0.95 : 0.6}
-          >
-            <title>{`${Math.round(hit.height)}m building, ${Math.round(hit.distance)}m`}</title>
-          </line>
+            x={x - 1}
+            y={topY}
+            width={2}
+            height={Math.max(1, botY - topY)}
+            fill={skylineFill}
+            opacity={0.55}
+          />
         );
       })}
+
+      {/* sightline — from the observer (angle 0 at x=0) to the launch */}
+      <line
+        x1={xAt(0)}
+        y1={yAt(0)}
+        x2={xAt(totalDistance)}
+        y2={yAt(sightline)}
+        stroke={isDark ? "#3987e5" : "#2a78d6"}
+        strokeWidth={2}
+      />
+
+      {/* the blocker on top of everything, verdict-colored and never
+          narrower than 6px so it never vanishes at long ranges */}
+      {blockerIdx >= 0 && (() => {
+        const hit = hits[blockerIdx];
+        const x = xAt(hit.distance);
+        const topY = yAt(hitAngles[blockerIdx]);
+        const botY = yAt(hitGroundAngles[blockerIdx]);
+        return (
+          <rect
+            x={x - 3}
+            y={topY}
+            width={6}
+            height={Math.max(1, botY - topY)}
+            fill={blockColor}
+            opacity={0.9}
+          >
+            <title>{`${Math.round(hit.height)}m building (${hit.confidence} confidence), ${Math.round(hit.distance)}m from you`}</title>
+          </rect>
+        );
+      })()}
+
+      {/* launch marker */}
+      <circle cx={xAt(totalDistance)} cy={yAt(sightline)} r={3} fill={blockColor} />
+
+      {/* baseline + axis labels */}
       <line x1={PAD_LEFT} y1={bottomY} x2={W - PAD_RIGHT} y2={bottomY} stroke={baseline} strokeWidth={1} />
       <text x={PAD_LEFT} y={H - 4} fontSize={10} fill={ink}>you</text>
       <text x={W - PAD_RIGHT} y={H - 4} fontSize={10} textAnchor="end" fill={ink}>launch</text>
@@ -315,14 +240,7 @@ function HorizonChart({ profile, isDark, width = DEFAULT_CHART_WIDTH, height = D
   );
 }
 
-HorizonChart.propTypes = {
-  profile: PropTypes.object.isRequired,
-  isDark: PropTypes.bool,
-  width: PropTypes.number,
-  height: PropTypes.number,
-};
-
-SightlineChart.propTypes = {
+SkylineChart.propTypes = {
   profile: PropTypes.object.isRequired,
   isDark: PropTypes.bool,
   width: PropTypes.number,
@@ -401,8 +319,8 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
   const color = verdictColor(frac);
   const label = verdictLabel(frac);
   // The building that actually drives the verdict — same "max req" logic
-  // SightlineChart uses to pick isBlocker — is the one whose height accuracy
-  // matters to how much the user should trust this result.
+  // SkylineChart uses to pick the blocker bar — is the one whose height
+  // accuracy matters to how much the user should trust this result.
   const blocker = hits.length > 0
     ? hits.reduce((tallest, h) => (h.req >= tallest.req ? h : tallest), hits[0])
     : null;
@@ -411,7 +329,6 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
   const copyGap = 1.5;
   const chartW = isDock ? chartWidth : DEFAULT_CHART_WIDTH;
   const chartH = isDock ? PROFILE_DOCK_CHART_PX : DEFAULT_CHART_HEIGHT;
-  const Chart = profile.totalDistance >= HORIZON_CHART_METERS ? HorizonChart : SightlineChart;
   const distanceLabel = profile.totalDistance >= 1000
     ? `${(profile.totalDistance / 1000).toFixed(1)} km from launch`
     : `${Math.round(profile.totalDistance)}m from launch`;
@@ -558,7 +475,7 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
     </>
   );
 
-  const chart = <Chart profile={profile} isDark={isDark} width={chartW} height={chartH} />;
+  const chart = <SkylineChart profile={profile} isDark={isDark} width={chartW} height={chartH} />;
 
   if (!isDock) {
     return (
