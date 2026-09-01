@@ -75,11 +75,8 @@ Koschmieder 公式(文档 §5):`W = exp(-3.912·s̄/V)`,s̄ 为代表性斜距,V
 
 半小时工作量，改动集中在 `LaunchPointControl.jsx` 的 CSS + `buildFireworkHtml`。
 
-## 观察点 3D 透视预览（"从这里看是什么样"）
+## 观察点 3D 透视预览（"从这里看是什么样"）—— 已完成（大改路线）
 
-用户选完观察点后，除了看侧栏里的数字和 sightline 图，希望能有个"从这里往发射点方向大概看一下是什么情况"的视觉预览——不用是照片写实级别的，能有个大致的场景感就行。可选实现方向：
+已实现 `components/analysis/ProfilePanel.jsx` 里的 `PerspectivePreview`：dock 右侧一块 320×PROFILE_DOCK_CHART_PX 的 SVG，用 pinhole camera 模型渲染观察者朝发射点方向的近似视野——天空渐变 + 地形剪影 + 建筑黑色轮廓 + blocker 用 verdict 色半透明 + 烟花绽放以真实角径画在正确仰角上、外加一圈虚线标记（即使被遮挡也永远可见）。数据全来自 `computeSightlineProfile` 的现有输出，没加新数据管道。
 
-- **小改**：允许下拉/拖动地图切成 3D 倾斜视角（maplibre 的 pitch 通过 ctrl+drag 已经能实现但不发现），需要 UI 引导或者一个"tilt"按钮，让用户能在地图上看到建筑挤出（`components/map/layers/explore/buildings/building/extrusion.json`）跟烟花高度的相对关系
-- **大改**：在观察点位置渲染一个独立的 3D 迷你场景（比如面板里的一个 300×200 canvas）：前景是附近建筑的轮廓剪影、背景是天空、烟花在正确仰角处爆开——直接回答"从这里看到什么样"这个问题。既有的建筑高度数据（`normalizeBuilding`）加上 `computeSightlineProfile` 的仰角计算已经能算出所需的所有几何信息，不需要额外数据源
-
-小改先做能立刻缓解痛点；大改工作量更大但是"能一眼看懂"的杀手锏，属于 `notes.md` 里那种可以单独开个 session 的项。
+不做的"小改"路线（maplibre 3D pitch + extrusion）与本预览是正交的两件事：预览回答"从这里看是什么样"，pitch 回答"这一带的建筑长什么样"。真需要后者时再补。

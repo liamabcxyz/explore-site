@@ -53,7 +53,10 @@ export default function PerfOverlay() {
     <Box
       sx={{
         position: "fixed",
-        bottom: 8,
+        // Sit above the profile dock when it's open, otherwise flush with
+        // the bottom — same pattern as BookmarkDial and LaunchPointControl,
+        // so this HUD doesn't cover the perspective preview inside the dock.
+        bottom: "calc(var(--vantage-profile-dock-height, 0px) + 8px)",
         right: 8,
         zIndex: 2000,
         bgcolor: "rgba(0,0,0,0.78)",

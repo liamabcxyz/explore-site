@@ -65,6 +65,10 @@ const PAD_RIGHT = 12;
 const PAD_TOP = 14;
 const PAD_BOTTOM = 22;
 const HAZE_HINT_METERS = 10000;
+// Width of the perspective-preview panel that sits beside the chart in dock
+// mode. The chart takes whatever's left after this — measured live so a
+// change here doesn't ripple.
+const PREVIEW_DOCK_WIDTH = 320;
 
 function plotSize(width, height) {
   return {
@@ -241,6 +245,176 @@ function SkylineChart({ profile, isDark, width = DEFAULT_CHART_WIDTH, height = D
 }
 
 SkylineChart.propTypes = {
+  profile: PropTypes.object.isRequired,
+  isDark: PropTypes.bool,
+  width: PropTypes.number,
+  height: PropTypes.number,
+};
+
+/**
+ * "What you'd actually see from here" — a small 3D-ish silhouette rendering
+ * of the observer's forward view toward the launch. Complements the
+ * SkylineChart (which shows the analysis as a diagram); this shows it as
+ * an approximate scene.
+ *
+ * Uses a pinhole camera model with the observer at the origin looking
+ * along the observer→launch bearing:
+ *   screen_x = focalPx * xOffset / distance
+ *   screen_y = horizonY - focalPx * tan(elevationAngle)
+ *
+ * The compute pipeline gives us a 1D world along the sightline — no true
+ * off-axis footprint or height data — so buildings get a deterministic
+ * jitter to spread them off the centerline and terrain samples are
+ * extruded sideways by a fake ±250m halfWidth to form a receding ground
+ * ribbon. Neither is metrically accurate off-axis, but the result reads
+ * unambiguously as "a landscape with things in it" and answers the "what
+ * would I see" question that the number-heavy chart cannot.
+ */
+function PerspectivePreview({ profile, isDark, width = 320, height = 200 }) {
+  const { hits, totalDistance, frac, theta } = profile;
+  const observerAlt = profile.observerAbsAlt ?? profile.eyeHeight ?? EYE_HEIGHT;
+  const targetAlt = profile.targetAbsAlt ?? profile.targetHeight;
+  const terrainProfile = profile.terrainProfile ?? [];
+
+  // 50° horizontal FOV — a comfortable near-peripheral human viewing
+  // angle. Wide enough to show foreground buildings taking up angular
+  // real estate, narrow enough to keep detail on the launch.
+  const FOV_DEG = 50;
+  const focalPx = width / (2 * Math.tan((FOV_DEG / 2) * Math.PI / 180));
+  const centerX = width / 2;
+  // Horizon slightly below chart center: leaves more room for the sky
+  // (where the burst is) and less for the ground.
+  const horizonY = height * 0.6;
+
+  const elevDeg = (a, d) => (d > 0
+    ? Math.atan2(apparentAltitude(a, d) - observerAlt, d) * (180 / Math.PI)
+    : 0);
+  const project = (d, a, xMeters = 0) => {
+    if (d <= 0.5) return { x: centerX, y: horizonY };
+    const e = elevDeg(a, d);
+    return {
+      x: centerX + focalPx * (xMeters / d),
+      y: horizonY - focalPx * Math.tan(e * Math.PI / 180),
+    };
+  };
+
+  // Deterministic pseudo-jitter off the exact centerline so buildings
+  // don't all stack at centerX. Seeded by index so re-renders don't
+  // shuffle the scene.
+  const jitterMeters = (i) => {
+    const seed = ((i + 1) * 2654435761) >>> 0;
+    return ((seed / 0xffffffff) * 2 - 1) * 30;
+  };
+
+  const skyTop = isDark ? "#0a1a30" : "#5680b0";
+  const skyHorizon = isDark ? "#4a3854" : "#f4c979";
+  const groundFill = isDark ? "#0e1a12" : "#2a3826";
+  const bldgColor = isDark ? "#000000" : "#101820";
+  const blockColor = verdictColor(frac);
+  const burstColor = frac >= 0.66 ? "#ffe066" : frac >= 0.33 ? "#ffb020" : blockColor;
+
+  // Terrain silhouette: our data is 1D along the sightline (no true off-axis
+  // terrain), so an "honest" 3D perspective extrusion collapses adjacent
+  // similar-elevation samples into a zero-height strip and reads as flat.
+  // Instead lay the samples out horizontally across the frame — near ones
+  // on the left, far ones on the right — with y as the projected elevation
+  // angle. This is a "panoramic ridgeline" reading: at each horizontal
+  // angle you're looking at what's along the sightline at that distance.
+  // Not metrically accurate off-axis, but it renders as an unmistakable
+  // hill/valley silhouette and answers "is there something in the way?".
+  const terrainMarginX = 4;
+  const terrainInnerW = width - terrainMarginX * 2;
+  const terrainSamples = terrainProfile
+    .filter((s) => s.distance >= 0.5)
+    .map((s, i, arr) => ({
+      x: terrainMarginX + (arr.length > 1 ? (i / (arr.length - 1)) * terrainInnerW : terrainInnerW / 2),
+      y: project(s.distance, s.elevation, 0).y,
+    }));
+  const terrainPath = terrainSamples.length >= 2
+    ? `M ${terrainSamples[0].x.toFixed(1)},${height} L ${terrainSamples
+        .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+        .join(" L ")} L ${terrainSamples[terrainSamples.length - 1].x.toFixed(1)},${height} Z`
+    : "";
+  // Slightly lighter than the base ground plane so hills stand out
+  // against the sky as filled bumps rather than blending into the plane.
+  const terrainRidgeFill = isDark ? "#14261b" : "#3a4d2f";
+
+  const blockerIdx = hits.length > 0
+    ? hits.reduce((best, h, i) => (h.req > hits[best].req ? i : best), 0)
+    : -1;
+
+  // Buildings drawn from far to near so near ones occlude far ones,
+  // painter's-algorithm style.
+  const bldgs = hits.map((hit, i) => ({ hit, i, isBlocker: i === blockerIdx }))
+    .sort((a, b) => b.hit.distance - a.hit.distance);
+
+  const burst = project(totalDistance, targetAlt, 0);
+  const burstRadiusPx = Math.max(3, (theta / 2) * (Math.PI / 180) * focalPx);
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`3D preview from viewing spot, ${Math.round(frac * 100)}% visible`}>
+      <defs>
+        <linearGradient id="pv-sky" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor={skyTop} />
+          <stop offset="1" stopColor={skyHorizon} />
+        </linearGradient>
+        <radialGradient id="pv-burst" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stopColor={burstColor} stopOpacity="0.95" />
+          <stop offset="0.6" stopColor={burstColor} stopOpacity="0.5" />
+          <stop offset="1" stopColor={burstColor} stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      <rect x={0} y={0} width={width} height={horizonY} fill="url(#pv-sky)" />
+      <rect x={0} y={horizonY} width={width} height={height - horizonY} fill={groundFill} />
+
+      {/* Filled burst goes behind foreground so a blocking building correctly
+          paints over it. The outline marker below is drawn after everything
+          so the "here's where the firework would be" hint stays visible even
+          when the view is fully blocked. */}
+      <circle cx={burst.x} cy={burst.y} r={burstRadiusPx} fill="url(#pv-burst)" />
+
+      {terrainPath && <path d={terrainPath} fill={terrainRidgeFill} opacity={0.95} />}
+
+      {bldgs.map(({ hit, i, isBlocker }) => {
+        const off = jitterMeters(i);
+        const base = project(hit.distance, interpolateTerrain(terrainProfile, hit.distance), off);
+        const top = project(hit.distance, hit.height, off);
+        const w = Math.max(1.5, 25 * focalPx / Math.max(hit.distance, 1));
+        if (base.y - top.y < 0.5) return null;
+        // Blocker gets a translucent scrim rather than a solid slab so a
+        // very-close blocker (an 85m building 150m away is 30° tall and
+        // fills over half the frame) doesn't paint out the whole scene.
+        return (
+          <rect
+            key={i}
+            x={base.x - w / 2}
+            y={top.y}
+            width={w}
+            height={Math.max(1, base.y - top.y)}
+            fill={isBlocker ? blockColor : bldgColor}
+            opacity={isBlocker ? 0.7 : 0.85}
+          >
+            <title>{`${Math.round(hit.height)}m building, ${Math.round(hit.distance)}m away${isBlocker ? " — blocks your view" : ""}`}</title>
+          </rect>
+        );
+      })}
+
+      {/* Burst position marker drawn last so it's always visible — even when
+          buildings/terrain have painted over the filled burst behind them,
+          this outlined ring plus a crosshair says "the firework would be
+          here" and lets the user picture the geometry. */}
+      <circle cx={burst.x} cy={burst.y} r={Math.max(burstRadiusPx, 6)} fill="none" stroke="#fff" strokeWidth={1.2} strokeDasharray="2 3" opacity={0.9} />
+      <circle cx={burst.x} cy={burst.y} r={2} fill="#fff" opacity={0.95} />
+
+      <text x={6} y={height - 6} fontSize={9} fill="rgba(255,255,255,0.75)" fontFamily="Montserrat, sans-serif">
+        approx view from viewing spot
+      </text>
+    </svg>
+  );
+}
+
+PerspectivePreview.propTypes = {
   profile: PropTypes.object.isRequired,
   isDark: PropTypes.bool,
   width: PropTypes.number,
@@ -476,12 +650,16 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
   );
 
   const chart = <SkylineChart profile={profile} isDark={isDark} width={chartW} height={chartH} />;
+  const preview = <PerspectivePreview profile={profile} isDark={isDark} width={PREVIEW_DOCK_WIDTH} height={chartH} />;
 
   if (!isDock) {
     return (
       <Box sx={{ p: 2 }}>
         {copy}
         {chart}
+        <Box sx={{ mt: 1 }}>
+          <PerspectivePreview profile={profile} isDark={isDark} width={DEFAULT_CHART_WIDTH} height={140} />
+        </Box>
       </Box>
     );
   }
@@ -555,19 +733,40 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
         )}
         {floorPicker}
       </Stack>
-      <Box
-        ref={chartHostRef}
+      <Stack
+        direction="row"
         sx={{
           height: PROFILE_DOCK_CHART_PX,
           minWidth: 0,
-          display: "flex",
-          alignItems: "stretch",
-          justifyContent: "stretch",
           overflow: "hidden",
         }}
       >
-        {chart}
-      </Box>
+        <Box
+          ref={chartHostRef}
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "stretch",
+            justifyContent: "stretch",
+            overflow: "hidden",
+          }}
+        >
+          {chart}
+        </Box>
+        <Box
+          sx={{
+            width: PREVIEW_DOCK_WIDTH,
+            flexShrink: 0,
+            overflow: "hidden",
+            borderLeft: isDark
+              ? "1px solid rgba(255,255,255,0.08)"
+              : "1px solid rgba(0,0,0,0.08)",
+          }}
+        >
+          {preview}
+        </Box>
+      </Stack>
     </Box>
   );
 }
