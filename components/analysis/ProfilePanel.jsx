@@ -264,6 +264,16 @@ export default function ProfilePanel({ isDark }) {
         ({profile.phi.toFixed(1)}°), not just whether anything blocks it.
       </Typography>
 
+      {/* Coverage caveat — mirrors the LaunchPointControl disclaimer. The
+          sightline math (lib/viewshed/sightline.js) tests against building
+          footprints only; trees, terrain, and weather aren't in the model.
+          Shown next to the verdict for one specific point so a user
+          looking at "Visible — 100%" for a spot along the edge of a park
+          knows why it might be wrong. */}
+      <Typography variant="caption" component="p" sx={{ mb: 1.5, fontStyle: "italic", color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)" }}>
+        Analysis considers buildings only — trees, terrain, and weather aren&apos;t factored in.
+      </Typography>
+
       <SightlineChart profile={profile} isDark={isDark} />
     </Box>
   );

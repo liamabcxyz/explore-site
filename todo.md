@@ -37,9 +37,13 @@ Koschmieder 公式(文档 §5):`W = exp(-3.912·s̄/V)`,s̄ 为代表性斜距,V
 
 ## 其他已识别但优先级更低的项目(不展开,先记一笔)
 
-- **地形/DEM 修正地面高程**——不是这份数学文档带来的新问题,是更早就被记录过的已知风险(旧金山这种丘陵地形,现在全仓库假设地面绝对平坦 z=0)。
+- **地形/DEM 修正地面高程**——现在全仓库假设地面绝对平坦 z=0,在丘陵/山区城市(SF Twin Peaks 280m、Nob Hill、西雅图、香港)会给出错误分析。杀手场景是"发射点和观察点之间隔着一座山",纯建筑视线数学(`lib/viewshed/sightline.js`)完全捕捉不到。UI 层已经有免责声明("Analysis considers ... terrain ... aren't factored in"),但真要修有三条路:
+  - **小路(视觉)**:maplibre 原生支持 `map.setTerrain({ source: "aws-terrain-tiles" })`,15 分钟改动就能让地图看起来 3D、山鼓出来。不改分析准确性,但让用户**看得见地形**,是一种诚实的视觉提示。
+  - **中路(陷阱,不建议)**:只对发射点/观察点这两个"点"取海拔高度(叠加到 `targetHeight`/观察者高度),不做视线沿线采样。修好了"我的点在山上"这种明显情况,但**留着"中间隔着山"这个杀手场景仍然错**。会让用户比现在更信任一个仍然错的工具——比"只挂声明"更糟。
+  - **大路(真解)**:全视线 DEM 栅格采样。数据源:**AWS Terrain Tiles**(Terrain-RGB PNG 格式,S3 免费无 auth,maplibre-gl 原生支持作为 `raster-dem` source)是最合适的;备选 Mapbox/MapTiler Terrain-RGB(同格式,商业级 UX,需 API key)、NASADEM/SRTM/Copernicus GLO-30(30m 全球,需格式转换)、USGS 3DEP(1m/3m 美国境内高精度)。实现:Worker 里 fetch + 解 PNG + 每 ~20m 沿视线采样,把地形作为跟建筑并列的遮挡物接入 `computeMinAlt`。多 session 工程量,类似于树冠高度栅格集成。
 - **光污染/环境光对比度因子**——需要额外数据源(夜光遥感之类),现在只值得记一笔。
 - **横向/方位角展开效应**——专业烟花秀常常沿一排发射架横向展开,观察者正对着看和侧着看视觉宽度差很多,这份数学文档完全没建模,需要先把数学讲清楚才能谈实现。
+- **树木/植被遮挡**——现在的视线数学(`lib/viewshed/sightline.js`)只测建筑轮廓,树木一律不算。中央公园边缘、林荫大道这些地方分析会给出错误的 "clear" 结论。现在的 UI 已经在 LaunchPointControl 和 ProfilePanel 里各加了一行免责声明("Analysis considers buildings only ...")。真要修有两条路:**小路**是用 Overture 的 `land_cover` 多边形(`components/map/layers/explore/base/land-cover/*.json`,已经在数据里)做粗略提示——观察点落在 `forest`/`shrub` 多边形内或视线穿过时,ProfilePanel 加一行"你的视线可能被树遮挡"。没有高度但有真实几何信号。**大路**是接入全球树冠高度栅格(NASA GEDI + Sentinel-2 衍生的公开数据,比如 ETH 苏黎世 2023 年 10m 分辨率全球树冠高度图),把采样到的高度喂进 `computeMinAlt` 跟建筑一起算。全球规模、真实物理答案,但需要新的 raster tile 数据管道。跟"地形/DEM"是同一级别的数据工程量。
 
 ---
 

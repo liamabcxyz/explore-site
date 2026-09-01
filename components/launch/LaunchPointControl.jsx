@@ -839,6 +839,14 @@ export default function LaunchPointControl() {
                 <LegendRow color={ROOFTOP_LEGEND_EXTRA.color} label={ROOFTOP_LEGEND_EXTRA.label} />
               )}
             </Stack>
+            {/* Coverage caveat — the sightline math only considers building
+                footprints (lib/viewshed/sightline.js). Trees, terrain, and
+                weather all matter in real life but aren't in the model yet;
+                see todo.md's tree-occlusion item. Saying so up front is
+                cheaper than being confidently wrong at a tree-lined park. */}
+            <Typography variant="caption" sx={{ color: "text.secondary", fontStyle: "italic" }}>
+              Analysis considers buildings only — trees, terrain, and weather aren&apos;t factored in.
+            </Typography>
             <Button
               size="small"
               onClick={() => {
