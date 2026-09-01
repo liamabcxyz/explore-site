@@ -67,7 +67,7 @@ export default function PerfOverlay() {
         minWidth: 190,
       }}
     >
-      <Stack direction="row" spacing={1} alignItems="baseline">
+      <Stack direction="row" spacing={1} sx={{ alignItems: "baseline" }}>
         <Box component="span" sx={{ color: "#fff", fontWeight: 700 }}>FPS</Box>
         <Box component="span" sx={{ color: fpsColor(fps) }}>{fps || "…"}</Box>
       </Stack>

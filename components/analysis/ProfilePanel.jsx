@@ -296,7 +296,7 @@ export default function ProfilePanel({ isDark }) {
         </Box>
       )}
 
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 0.5 }}>
         <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: color, flexShrink: 0 }} />
         <Typography variant="subtitle2" sx={{ fontFamily: "Montserrat, sans-serif" }}>
           {label} — {Math.round(frac * 100)}% of the shell
@@ -318,7 +318,7 @@ export default function ProfilePanel({ isDark }) {
         </Typography>
       )}
 
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 0.5 }}>
         <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: CATEGORY_COLOR[profile.category], flexShrink: 0 }} />
         <Typography variant="caption">
           Overall viewing quality: {Math.round(profile.score * 100)}% ({CATEGORY_LABEL[profile.category]})

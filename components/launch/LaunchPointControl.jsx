@@ -214,7 +214,7 @@ function LegendSwatch({ color }) {
 
 function LegendRow({ color, label }) {
   return (
-    <Stack direction="row" spacing={1} alignItems="center">
+    <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
       <LegendSwatch color={color} />
       <Typography variant="caption" sx={{ color: "text.secondary" }}>{label}</Typography>
     </Stack>
@@ -866,7 +866,7 @@ export default function LaunchPointControl() {
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
               Click any spot in the circle to check what&apos;s visible from there.
             </Typography>
-            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
               <Typography variant="caption">
                 Caliber: {caliber}&quot; · burst ~{Math.round(targetHeight)}m
                 {rooftopBase > 0 && ` (incl. ${Math.round(rooftopBase)}m rooftop)`}
