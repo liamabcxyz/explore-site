@@ -65,38 +65,80 @@ const PLOT_WIDTH = WIDTH - PAD_LEFT - PAD_RIGHT;
 const PLOT_HEIGHT = HEIGHT - PAD_TOP - PAD_BOTTOM;
 
 function SightlineChart({ profile, isDark }) {
-  const { totalDistance, eyeHeight, targetHeight, shellRadius, minAlt, frac, hits } = profile;
+  const {
+    totalDistance, eyeHeight, targetHeight, shellRadius, frac, hits,
+  } = profile;
+  // Phase 5 added the absolute-altitude fields and terrainProfile.
+  // Older callers (and pre-Phase-5 tests) hand us the pre-Phase-5 shape;
+  // fall back so the chart renders identically to before in that case
+  // (relative altitudes with a flat, empty terrain).
+  const observerGroundElev = profile.observerGroundElev ?? 0;
+  const launchElev = profile.launchElev ?? 0;
+  const observerAbsAlt = profile.observerAbsAlt ?? eyeHeight;
+  const targetAbsAlt = profile.targetAbsAlt ?? targetHeight;
+  const terrainProfile = profile.terrainProfile ?? [];
 
-  const bandTop = targetHeight + shellRadius;
-  const bandBottom = targetHeight - shellRadius;
+  // Everything plotted on one absolute-altitude axis, so buildings
+  // (whose height is absolute post-Phase-3) sit next to observer eye
+  // (observerAbsAlt) and burst (targetAbsAlt) at consistent altitude
+  // even in hilly terrain. Pre-Phase-3 code path (no terrain) has
+  // observerGroundElev = launchElev = 0, so this collapses to the old
+  // "everything relative to sea level = same as relative to ground"
+  // behavior automatically.
+  const bandTop = targetAbsAlt + shellRadius;
+  const bandBottom = targetAbsAlt - shellRadius;
   const maxHitHeight = hits.reduce((m, h) => Math.max(m, h.height), 0);
-  const maxY = Math.max(bandTop, maxHitHeight, eyeHeight) * 1.1;
+  const maxTerrainElev = terrainProfile.reduce((m, s) => Math.max(m, s.elevation), 0);
+  const maxY = Math.max(bandTop, maxHitHeight, observerAbsAlt, maxTerrainElev) * 1.1;
+  // With terrain, the chart may want a floor below 0 (e.g., burst near
+  // sea level, terrain higher). For now stick with 0 baseline — the SF
+  // case has everything ≥ 0m ASL and adjusting per-analysis would
+  // introduce chart jitter across nearby launches.
+  const minY = 0;
 
   const ink = isDark ? "#c3c2b7" : "#52514e";
   const baseline = isDark ? "#383835" : "#c3c2b7";
+  const terrainFill = isDark ? "#5c4a38" : "#d4c3a8";
   const nonBlockingFill = "#898781";
   const blockColor = verdictColor(frac);
 
   const xAt = (distance) => PAD_LEFT + (distance / totalDistance) * PLOT_WIDTH;
-  const yAt = (h) => PAD_TOP + PLOT_HEIGHT - (h / maxY) * PLOT_HEIGHT;
+  const yAt = (h) => PAD_TOP + PLOT_HEIGHT - ((h - minY) / (maxY - minY)) * PLOT_HEIGHT;
 
-  const groundY = yAt(0);
+  const bottomY = yAt(minY);
   const blockerReq = hits.length > 0 ? Math.max(...hits.map((h) => h.req)) : null;
+
+  // Terrain silhouette: closed polygon that traces the ground profile,
+  // closing at the chart's bottom line. Renders first so buildings and
+  // sightline overlay it. When terrainGrid is absent, all elevations
+  // are 0 and the polygon collapses to a flat strip along the x-axis —
+  // visually indistinguishable from the ground line we already drew,
+  // so no special-case needed.
+  const terrainPath = (() => {
+    if (terrainProfile.length < 2) return "";
+    const pts = terrainProfile.map((s) => `${xAt(s.distance).toFixed(2)},${yAt(s.elevation).toFixed(2)}`).join(" L ");
+    return `M ${xAt(0).toFixed(2)},${bottomY.toFixed(2)} L ${pts} L ${xAt(totalDistance).toFixed(2)},${bottomY.toFixed(2)} Z`;
+  })();
 
   return (
     <svg width={WIDTH} height={HEIGHT} role="img" aria-label={`Sightline profile, ${Math.round(frac * 100)}% visible`}>
-      {/* ground */}
-      <line x1={PAD_LEFT} y1={groundY} x2={WIDTH - PAD_RIGHT} y2={groundY} stroke={baseline} strokeWidth={1} />
+      {/* terrain silhouette (drawn first so buildings and sightline sit on top) */}
+      {terrainPath && <path d={terrainPath} fill={terrainFill} opacity={0.55} />}
+
+      {/* ground reference line at sea level */}
+      <line x1={PAD_LEFT} y1={bottomY} x2={WIDTH - PAD_RIGHT} y2={bottomY} stroke={baseline} strokeWidth={1} />
 
       {/* the building the observer is standing on, if eyeHeight is elevated
           above just standing at ground level — otherwise "you" would read as
-          floating in midair with nothing under it */}
+          floating in midair with nothing under it. eyeHeight is the RELATIVE
+          input value (meters above local ground) so the comparison against
+          the raw EYE_HEIGHT constant still works regardless of terrain. */}
       {eyeHeight > EYE_HEIGHT + 0.5 && (
         <rect
           x={xAt(0) - Math.max(4, PLOT_WIDTH * 0.03) / 2}
-          y={yAt(eyeHeight)}
+          y={yAt(observerAbsAlt)}
           width={Math.max(4, PLOT_WIDTH * 0.03)}
-          height={groundY - yAt(eyeHeight)}
+          height={yAt(observerGroundElev) - yAt(observerAbsAlt)}
           fill={nonBlockingFill}
           opacity={0.4}
         />
@@ -107,13 +149,18 @@ function SightlineChart({ profile, isDark }) {
         const isBlocker = hit.req === blockerReq;
         const x = xAt(hit.distance);
         const barWidth = Math.max(4, PLOT_WIDTH * 0.03);
+        // Building base: sample terrain at hit.distance (interpolated
+        // from terrainProfile) so bars stand on the ground silhouette
+        // rather than floating above/below it. Fall back to sea level
+        // when terrain isn't loaded — cosmetically same as pre-Phase-5.
+        const baseElev = interpolateTerrain(terrainProfile, hit.distance);
         return (
           <rect
             key={i}
             x={x - barWidth / 2}
             y={yAt(hit.height)}
             width={barWidth}
-            height={groundY - yAt(hit.height)}
+            height={yAt(baseElev) - yAt(hit.height)}
             fill={isBlocker ? blockColor : nonBlockingFill}
             opacity={isBlocker ? 0.9 : 0.6}
           >
@@ -125,9 +172,9 @@ function SightlineChart({ profile, isDark }) {
       {/* sightline, drawn after the buildings so a tall blocker visually cuts it off */}
       <line
         x1={xAt(0)}
-        y1={yAt(eyeHeight)}
+        y1={yAt(observerAbsAlt)}
         x2={xAt(totalDistance)}
-        y2={yAt(targetHeight)}
+        y2={yAt(targetAbsAlt)}
         stroke={isDark ? "#3987e5" : "#2a78d6"}
         strokeWidth={2}
       />
@@ -141,15 +188,33 @@ function SightlineChart({ profile, isDark }) {
         fill={verdictColor(frac)}
         opacity={0.25}
       />
-      <circle cx={xAt(totalDistance)} cy={yAt(targetHeight)} r={3} fill={verdictColor(frac)} />
+      <circle cx={xAt(totalDistance)} cy={yAt(targetAbsAlt)} r={3} fill={verdictColor(frac)} />
 
       {/* axis labels */}
       <text x={PAD_LEFT} y={HEIGHT - 4} fontSize={10} fill={ink}>you</text>
       <text x={WIDTH - PAD_RIGHT} y={HEIGHT - 4} fontSize={10} textAnchor="end" fill={ink}>launch point</text>
       <text x={4} y={PAD_TOP + 8} fontSize={10} fill={ink}>{Math.round(maxY)}m</text>
-      <text x={4} y={groundY} fontSize={10} fill={ink}>0m</text>
+      <text x={4} y={bottomY} fontSize={10} fill={ink}>{Math.round(minY)}m</text>
     </svg>
   );
+}
+
+// Simple piecewise-linear lookup on the terrainProfile samples. Called for
+// building bases so bars stand on the drawn ground silhouette instead of
+// floating.
+function interpolateTerrain(profile, distance) {
+  if (profile.length === 0) return 0;
+  if (distance <= profile[0].distance) return profile[0].elevation;
+  if (distance >= profile[profile.length - 1].distance) return profile[profile.length - 1].elevation;
+  for (let i = 1; i < profile.length; i++) {
+    if (profile[i].distance >= distance) {
+      const a = profile[i - 1];
+      const b = profile[i];
+      const t = (distance - a.distance) / (b.distance - a.distance);
+      return a.elevation + t * (b.elevation - a.elevation);
+    }
+  }
+  return 0;
 }
 
 SightlineChart.propTypes = {
@@ -264,14 +329,13 @@ export default function ProfilePanel({ isDark }) {
         ({profile.phi.toFixed(1)}°), not just whether anything blocks it.
       </Typography>
 
-      {/* Coverage caveat — mirrors the LaunchPointControl disclaimer. The
-          sightline math (lib/viewshed/sightline.js) tests against building
-          footprints only; trees, terrain, and weather aren't in the model.
-          Shown next to the verdict for one specific point so a user
-          looking at "Visible — 100%" for a spot along the edge of a park
-          knows why it might be wrong. */}
+      {/* Coverage caveat — mirrors the LaunchPointControl disclaimer.
+          Post-Phase-5 the sightline math factors in both buildings AND
+          terrain (see 地形高程集成_实施方案.md); still not modeled:
+          trees and weather. Kept per-spot so a user seeing "Visible —
+          100%" at a park edge knows the tree canopy isn't in the number. */}
       <Typography variant="caption" component="p" sx={{ mb: 1.5, fontStyle: "italic", color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)" }}>
-        Analysis considers buildings only — trees, terrain, and weather aren&apos;t factored in.
+        Analysis considers buildings and terrain — trees and weather aren&apos;t factored in.
       </Typography>
 
       <SightlineChart profile={profile} isDark={isDark} />

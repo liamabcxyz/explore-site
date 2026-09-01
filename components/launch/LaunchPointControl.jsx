@@ -907,13 +907,13 @@ export default function LaunchPointControl() {
                 <LegendRow color={ROOFTOP_LEGEND_EXTRA.color} label={ROOFTOP_LEGEND_EXTRA.label} />
               )}
             </Stack>
-            {/* Coverage caveat — the sightline math only considers building
-                footprints (lib/viewshed/sightline.js). Trees, terrain, and
-                weather all matter in real life but aren't in the model yet;
-                see todo.md's tree-occlusion item. Saying so up front is
-                cheaper than being confidently wrong at a tree-lined park. */}
+            {/* Coverage caveat — analysis now factors in buildings AND
+                terrain (see 地形高程集成_实施方案.md phases 1-5); still
+                missing: trees and weather. Kept the disclaimer so users
+                who see the tool succeed at Twin Peaks don't overtrust it
+                at Central Park's tree-lined edges. */}
             <Typography variant="caption" sx={{ color: "text.secondary", fontStyle: "italic" }}>
-              Analysis considers buildings only — trees, terrain, and weather aren&apos;t factored in.
+              Analysis considers buildings and terrain — trees and weather aren&apos;t factored in.
             </Typography>
             <Button
               size="small"

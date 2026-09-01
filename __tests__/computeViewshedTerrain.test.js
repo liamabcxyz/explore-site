@@ -220,6 +220,46 @@ describe("computeSightlineProfile with terrain", () => {
     expect(nulled.hits).toEqual(omitted.hits);
   });
 
+  it("blocks the profile when a terrain ridge stands between observer and launch (phase 5)", () => {
+    // The single-point sibling of the grid test above. Observer far
+    // west of launch, no buildings, but a ridge in between rising to
+    // 300m. Without terrain the profile reads fully visible; with
+    // terrain the ridge is sampled along the sightline (every 20m per
+    // TERRAIN_STEP in computeProfile.js), one of those samples lands
+    // inside the ridge, and its req dominates minAlt.
+    const observer = { ...projector.toLatLng(-100, 0) }; // 100m west of launch
+    const args = {
+      observer, launch, targetHeight: 80, shellRadius: 10,
+      buildings: [], observerHeight: 1.6,
+    };
+    // Same ridge fixture as the grid test's phase-4 case
+    const nw = projector.toLatLng(-150, 30);
+    const se = projector.toLatLng(30, -30);
+    const cellsX = 20;
+    const cellsY = 4;
+    const data = new Float32Array(cellsX * cellsY);
+    for (let row = 0; row < cellsY; row++) {
+      for (let col = 8; col <= 12; col++) {
+        data[row * cellsX + col] = 300;
+      }
+    }
+    const terrainGrid = new ElevationGrid({
+      data, cellsX, cellsY,
+      northLat: nw.lat, westLng: nw.lng,
+      latStepDeg: (se.lat - nw.lat) / (cellsY - 1),
+      lngStepDeg: (se.lng - nw.lng) / (cellsX - 1),
+    });
+
+    const flat = computeSightlineProfile(args);
+    expect(flat.frac).toBe(1);
+
+    const withRidge = computeSightlineProfile({ ...args, terrainGrid });
+    expect(withRidge.frac).toBe(0);
+    // terrainProfile should have the ridge's ~300m samples in it
+    const maxTerrainElev = Math.max(...withRidge.terrainProfile.map((s) => s.elevation));
+    expect(maxTerrainElev).toBeGreaterThan(200); // interpolation may soften the peak
+  });
+
   it("returns identical result under a uniform 300m terrain lift", () => {
     // Same invariant as the ground-grid test above but for the profile
     // path — every height baseline moves in lock-step, geometry is
