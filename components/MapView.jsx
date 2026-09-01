@@ -24,6 +24,7 @@ import {
   addHillshadeLayer,
   HILLSHADE_LAYER_ID,
 } from "@/lib/LayerManager";
+import { TerrainToggleControl } from "@/lib/TerrainToggleControl";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 maplibregl.setWorkerUrl(`${basePath}/maplibre-gl-worker.mjs`);
@@ -206,6 +207,7 @@ export default function Map({
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
     map.addControl(new maplibregl.GeolocateControl(), "top-right");
+    map.addControl(new TerrainToggleControl(HILLSHADE_LAYER_ID), "top-right");
     map.addControl(new maplibregl.ScaleControl(), "bottom-left");
     map.addControl(
       new maplibregl.AttributionControl({

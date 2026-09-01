@@ -71,3 +71,11 @@
 .maplibregl-ctrl button.maplibregl-ctrl-geolocate.maplibregl-ctrl-geolocate-background-error::after {
   color: #e54e33;
 }
+
+.maplibregl-ctrl button.maplibregl-ctrl-terrain::after {
+  content: 'terrain';
+}
+
+.maplibregl-ctrl button.maplibregl-ctrl-terrain.maplibregl-ctrl-terrain-active::after {
+  color: #33b5e5;
+}
