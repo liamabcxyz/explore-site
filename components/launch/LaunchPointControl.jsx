@@ -856,7 +856,7 @@ export default function LaunchPointControl() {
     const distance = Math.hypot(x, y);
     const useCorridor = distance > ANALYSIS_RADIUS;
 
-    const finish = (buildings, terrainGrid, coverageGaps) => {
+    const finish = (buildings, terrainGrid, coverageGaps, mode) => {
       const building = findBuildingAt(observer, buildings);
       const maxFloors = building ? Math.max(1, Math.round(building.height / METERS_PER_FLOOR)) : 0;
       let observerHeight = EYE_HEIGHT;
@@ -879,7 +879,15 @@ export default function LaunchPointControl() {
       });
 
       const observerBuilding = building ? { ...building, maxFloors } : null;
-      setAnalysis({ launch, targetHeight, shellRadius, caliber, observer, observerBuilding, profile });
+      // mode/buildingsConsidered/*Meters exist purely so ProfilePanel's debug-
+      // log button (lib/viewshed/debugReport.js) can explain which fetch path
+      // ran and how many buildings it fed into the intersection test — not
+      // consumed by the visibility math itself.
+      setAnalysis({
+        launch, targetHeight, shellRadius, caliber, observer, observerBuilding, profile,
+        mode, buildingsConsidered: buildings.length,
+        analysisRadiusMeters: ANALYSIS_RADIUS, corridorBufferMeters: CORRIDOR_BUFFER_METERS,
+      });
       paintSightline(observer, profile);
     };
 
@@ -892,7 +900,7 @@ export default function LaunchPointControl() {
         if (cancelled) return;
         const allBuildings = buildingsFromMapFeatures(buildingFeats, partFeats);
         const buildings = filterBuildingsNearPoint(allBuildings, launch, ANALYSIS_RADIUS);
-        finish(buildings, elevationGridRef.current, []);
+        finish(buildings, elevationGridRef.current, [], "grid");
       });
       return () => { cancelled = true; };
     }
@@ -929,7 +937,7 @@ export default function LaunchPointControl() {
         const span = tileDistanceSpan(tile, observer, launch, TERRAIN_TILE_ZOOM);
         if (span) terrainGaps.push({ ...span, source: "terrain" });
       }
-      finish(buildings, grid, [...coverageGaps, ...terrainGaps]);
+      finish(buildings, grid, [...coverageGaps, ...terrainGaps], "corridor");
     }).catch((err) => {
       if (cancelled) return;
       console.error("corridor sightline fetch failed:", err);

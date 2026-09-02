@@ -261,7 +261,10 @@ describe("ProfilePanel", () => {
         <ProfilePanel isDark={false} layout="dock" />
       </LaunchContext.Provider>
     );
-    const svg = container.querySelector("svg");
+    // Scoped to role="img" so the header's icon-button svg (the debug-log
+    // copy button, lib/viewshed/debugReport.js) doesn't match instead —
+    // SkylineChart is the only svg in this tree with an aria-label/role.
+    const svg = container.querySelector('svg[role="img"]');
     expect(svg).not.toBeNull();
     expect(Number(svg.getAttribute("width"))).toBeGreaterThanOrEqual(320);
   });

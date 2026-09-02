@@ -1,9 +1,11 @@
 import PropTypes from "prop-types";
 import { useLayoutEffect, useRef, useState } from "react";
-import { Box, Typography, Stack, ToggleButton, ToggleButtonGroup, Slider } from "@mui/material";
+import { Box, Typography, Stack, ToggleButton, ToggleButtonGroup, Slider, IconButton, Tooltip, Snackbar } from "@mui/material";
+import { Bug } from "iconoir-react";
 import { useLaunchAnalysis } from "@/lib/LaunchContext";
 import { EYE_HEIGHT } from "@/lib/viewshed/scoring";
 import { apparentAltitude } from "@/lib/viewshed/curvature";
+import { buildSightlineDebugReport } from "@/lib/viewshed/debugReport";
 import { PROFILE_DOCK_CHART_PX, PROFILE_DOCK_HEADER_PX, PROFILE_DOCK_PROMPT_PX } from "@/components/analysis/profileDockMetrics";
 
 // Same red/yellow/green the map's own viewshed grid dots use (see the
@@ -452,6 +454,21 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
   const [chartHostRef, chartWidth] = useMeasuredWidth(
     isDock && Boolean(analysis?.observer && analysis?.profile),
   );
+  const [debugCopied, setDebugCopied] = useState(false);
+  const [debugCopyFailed, setDebugCopyFailed] = useState(false);
+
+  // Copies the full annotated computation (see lib/viewshed/debugReport.js)
+  // to the clipboard so a user who suspects a wrong result can paste it
+  // straight into a bug report — also logged so it's recoverable from
+  // devtools if the clipboard write is blocked (no HTTPS, no permission).
+  const handleCopyDebugLog = () => {
+    const report = buildSightlineDebugReport(analysis, viewerLevel);
+    console.log(report);
+    navigator.clipboard.writeText(report).then(
+      () => setDebugCopied(true),
+      () => setDebugCopyFailed(true),
+    );
+  };
   const mutedColor = "rgba(0,0,0,0.4)";
   const promptSx = {
     height: isDock ? PROFILE_DOCK_PROMPT_PX : undefined,
@@ -731,6 +748,16 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
             Updating…
           </Typography>
         )}
+        <Tooltip title="Copy a detailed sightline debug log to the clipboard">
+          <IconButton
+            size="small"
+            onClick={handleCopyDebugLog}
+            aria-label="Copy sightline debug log"
+            sx={{ flexShrink: 0, color: isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.6)" }}
+          >
+            <Bug width={18} height={18} />
+          </IconButton>
+        </Tooltip>
         {floorPicker}
       </Stack>
       <Stack
@@ -767,6 +794,18 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
           {preview}
         </Box>
       </Stack>
+      <Snackbar
+        open={debugCopied}
+        autoHideDuration={2000}
+        onClose={() => setDebugCopied(false)}
+        message="Sightline debug log copied to clipboard"
+      />
+      <Snackbar
+        open={debugCopyFailed}
+        autoHideDuration={4000}
+        onClose={() => setDebugCopyFailed(false)}
+        message="Couldn't copy to clipboard — check the browser console for the log"
+      />
     </Box>
   );
 }
