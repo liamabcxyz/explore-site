@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import LaunchContext from "@/lib/LaunchContext";
 
 // Thin state bucket, no business logic — LaunchPointControl writes the
@@ -34,6 +34,26 @@ export default function LaunchProvider({ children }) {
   }, []);
   const isVantageClickAt = useCallback((lngLat) => clickCaptureRef.current(lngLat), []);
 
+  // Annotations captured by the "Report a problem" flow — see
+  // components/analysis/ReportProblemDialog.jsx and
+  // components/analysis/AnnotationLayer.jsx. Stored here (not per-dialog-
+  // instance) so the pins survive dialog close/reopen and the MapView's
+  // click handler can address them without prop-drilling. `annotationMode`
+  // is a boolean "am I currently arming the next map click to become an
+  // annotation?" — set true by the dialog, cleared by MapView after the
+  // click lands.
+  const [annotations, setAnnotations] = useState([]);
+  const [annotationMode, setAnnotationMode] = useState(false);
+  // Ref-mirror of annotationMode so MapView's one-shot mount-time click
+  // handler (which captures LaunchContext at first render only, matching
+  // how isVantageClickAt is threaded) can always read the current value
+  // without needing to re-subscribe. Same trick as clickCaptureRef above.
+  const annotationModeRef = useRef(false);
+  useEffect(() => {
+    annotationModeRef.current = annotationMode;
+  }, [annotationMode]);
+  const isArmingAnnotation = useCallback(() => annotationModeRef.current, []);
+
   const value = useMemo(
     () => ({
       analysis,
@@ -42,8 +62,13 @@ export default function LaunchProvider({ children }) {
       setViewerLevel,
       setClickCapturePredicate,
       isVantageClickAt,
+      annotations,
+      setAnnotations,
+      annotationMode,
+      setAnnotationMode,
+      isArmingAnnotation,
     }),
-    [analysis, viewerLevel, setClickCapturePredicate, isVantageClickAt]
+    [analysis, viewerLevel, setClickCapturePredicate, isVantageClickAt, annotations, annotationMode, isArmingAnnotation]
   );
 
   return <LaunchContext.Provider value={value}>{children}</LaunchContext.Provider>;

@@ -1,4 +1,19 @@
+import { execSync } from "node:child_process";
+
 const basePath = process.env.BASEURL ? `/${process.env.BASEURL}` : "";
+
+// Bake the current commit + build time into the client so a "report a
+// problem" bundle can name the exact code that produced its numbers.
+// Fall back cleanly outside a git checkout (installed tarball, docker
+// build with a shallow clone that misses HEAD, etc.) — an "unknown" here
+// is much better than crashing the build.
+let gitSha = "unknown";
+try {
+  gitSha = execSync("git rev-parse --short HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+} catch {
+  // leave "unknown"
+}
+const buildTime = new Date().toISOString();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -7,6 +22,8 @@ const nextConfig = {
   assetPrefix: basePath,
   env: {
     NEXT_PUBLIC_BASE_PATH: basePath,
+    NEXT_PUBLIC_GIT_SHA: gitSha,
+    NEXT_PUBLIC_BUILD_TIME: buildTime,
   },
   images: {
     unoptimized: true,

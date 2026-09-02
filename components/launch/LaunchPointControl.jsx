@@ -23,6 +23,9 @@ import { tileDistanceSpan } from "@/lib/viewshed/tileWalk";
 import { sightlineMapData } from "@/lib/viewshed/sightlineLayer";
 import { deriveShellParams, STANDARD_CALIBERS_INCHES } from "@/lib/viewshed/caliber";
 import { FIREWORKS_PRESETS } from "@/lib/fireworksPresets";
+// Read from the standalone state store so this doesn't force stacService's
+// stac-js ESM import into any test transitively including this file.
+import { getPinnedReleaseId } from "@/lib/stacReleaseState";
 
 // 1500m covers the full comfortable viewing ring even for a 12" shell.
 // Was dropped to 500m as a stopgap while placing a launch point froze the
@@ -255,6 +258,13 @@ export default function LaunchPointControl() {
   const [placingObserver, setPlacingObserver] = useState(false);
   const [presetMenuAnchor, setPresetMenuAnchor] = useState(null);
   const [launch, setLaunch] = useState(() => urlInitialState.launch ?? null);
+  // Preset id if a real-show was picked from the menu. Written to the URL
+  // as `?preset=<id>` for informational value — the receiver of a shared
+  // link (or a bug report) can see "the user was looking at Macy's" rather
+  // than reverse-engineering it from coordinates. Cleared automatically
+  // when the user manually moves the launch point, since the preset id
+  // no longer applies to whatever custom spot they've picked.
+  const [selectedPresetId, setSelectedPresetId] = useState(() => urlInitialState.presetId ?? null);
   // Caliber drives both burst height and shell radius (烟花可视性数学模型.md
   // §1.4) — no manual override of the derived values, since letting a user
   // set height/radius independently is exactly the physically-inconsistent-
@@ -358,11 +368,18 @@ export default function LaunchPointControl() {
       observer,
       viewerLevel: contextViewerLevel,
       showRooftopLayer,
+      presetId: selectedPresetId,
+      // getPinnedReleaseId is a sync read of whatever release the STAC
+      // pipeline landed on (null before it loads) — snapshotting it into
+      // the URL lets a report receiver know which Overture release
+      // produced the numbers, even though the URL alone can't yet force
+      // a rebind on a fresh open.
+      stacRelease: getPinnedReleaseId() ?? undefined,
     });
     if (nextSearch === currentSearch) return;
     const url = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
     window.history.replaceState(null, "", url);
-  }, [launch, caliber, observer, contextViewerLevel, showRooftopLayer]);
+  }, [launch, caliber, observer, contextViewerLevel, showRooftopLayer, selectedPresetId]);
 
   // Publish "does VANTAGE want to keep this click for itself?" through the
   // launch context so MapView.jsx's own click handler can early-return
@@ -417,6 +434,7 @@ export default function LaunchPointControl() {
     setPlacing(false);
     setPlacingObserver(false);
     setObserver(null);
+    setSelectedPresetId(preset.id);
     setFireworkPlayCount((n) => n + 1);
     if (map) {
       map.flyTo({
@@ -567,6 +585,10 @@ export default function LaunchPointControl() {
       if (!placingRef.current) return;
       setLaunch({ lat: e.lngLat.lat, lng: e.lngLat.lng });
       setObserver(null); // stale profile pointed at the old launch location
+      // Manual placement invalidates any preset-id lineage — the launch is
+      // no longer at Macy's coords, so leaving `?preset=nyc-macys` in the
+      // URL would be a lie.
+      setSelectedPresetId(null);
       setPlacing(false);
     };
     map.on("click", onClick);
@@ -1099,6 +1121,7 @@ export default function LaunchPointControl() {
               onClick={() => {
                 setLaunch(null);
                 setObserver(null);
+                setSelectedPresetId(null);
               }}
             >
               Clear

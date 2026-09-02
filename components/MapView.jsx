@@ -26,6 +26,13 @@ import {
   HILLSHADE_LAYER_ID,
 } from "@/lib/LayerManager";
 import { TerrainToggleControl } from "@/lib/TerrainToggleControl";
+import { parseLaunchUrlState, writeLaunchUrlState } from "@/lib/launchUrlState";
+import { createAnnotation, MAX_ANNOTATIONS } from "@/lib/debug/annotations";
+import {
+  addAnnotationLayers,
+  annotationsToGeoJson,
+  ANNOTATION_SOURCE_ID,
+} from "@/lib/debug/annotationLayer";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 maplibregl.setWorkerUrl(`${basePath}/maplibre-gl-worker.mjs`);
@@ -207,7 +214,33 @@ export default function Map({
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
     map.addControl(new maplibregl.GeolocateControl(), "top-right");
-    map.addControl(new TerrainToggleControl(HILLSHADE_LAYER_ID), "top-right");
+    // Hillshade toggle: seed from URL (`?hs=1`) so a shared link with
+    // hillshade on brings it back; mirror future toggles back to the URL
+    // through the same parseLaunchUrlState/writeLaunchUrlState channel
+    // LaunchPointControl uses, so a single copy-URL captures both the
+    // launch analysis and this display toggle.
+    let initialHillshade = false;
+    try {
+      initialHillshade = parseLaunchUrlState(window.location.search).hillshadeOn === true;
+    } catch { /* SSR / non-window contexts fall back to off */ }
+    map.addControl(
+      new TerrainToggleControl(HILLSHADE_LAYER_ID, {
+        initialVisible: initialHillshade,
+        onChange: (visible) => {
+          try {
+            const current = window.location.search.startsWith("?")
+              ? window.location.search.slice(1)
+              : window.location.search;
+            const next = writeLaunchUrlState(current, { hillshadeOn: visible });
+            if (next !== current) {
+              const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`;
+              window.history.replaceState(null, "", url);
+            }
+          } catch { /* URL update failure is non-fatal */ }
+        },
+      }),
+      "top-right"
+    );
     map.addControl(new maplibregl.ScaleControl(), "bottom-left");
     map.addControl(
       new maplibregl.AttributionControl({
@@ -255,6 +288,35 @@ export default function Map({
 
     // Click handler
     map.on("click", (e) => {
+      // "Report a problem" annotation flow — when the dialog has armed
+      // the next click, capture whichever building (or empty ground) the
+      // user pointed at, add it to the annotations list, and disarm.
+      // Runs before every other click route so the annotation supersedes
+      // launch placement / feature inspect.
+      if (launchAnalysis?.isArmingAnnotation?.()) {
+        const bldgFeats = map.queryRenderedFeatures(e.point).filter(
+          (f) => f.source === "buildings" && f.sourceLayer === "building"
+        );
+        const bldgProps = bldgFeats[0]?.properties ?? null;
+        const target = {
+          lat: e.lngLat.lat,
+          lng: e.lngLat.lng,
+          building: bldgProps
+            ? {
+                id: bldgProps.id ?? null,
+                name: bldgProps.name ?? null,
+                height: typeof bldgProps.height === "number" ? bldgProps.height : null,
+                confidence: bldgProps.height_source ?? null,
+              }
+            : null,
+        };
+        launchAnalysis.setAnnotations?.((prev) =>
+          prev.length >= MAX_ANNOTATIONS ? prev : [...prev, createAnnotation(target)]
+        );
+        launchAnalysis.setAnnotationMode?.(false);
+        return;
+      }
+
       // Defer to the launch flow when it's consuming this click (placing a
       // launch point, or picking an observer in place-observer mode) —
       // otherwise the feature-inspect panel pops on whatever building sat
@@ -375,6 +437,10 @@ export default function Map({
       if (map.getLayer("buildings-building-extrusion")) {
         map.moveLayer(HILLSHADE_LAYER_ID, "buildings-building-extrusion");
       }
+      // Annotation pins for the "Report a problem" flow — registered
+      // once the style has all the base layers, so the pins sit on top
+      // of everything (default addLayer position).
+      addAnnotationLayers(map);
       setSourcesAdded(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -394,6 +460,14 @@ export default function Map({
     if (!sourcesAdded || !mapRef.current) return;
     updateLayerVisibility(mapRef.current, visibleTypes);
   }, [visibleTypes, sourcesAdded]);
+
+  // Sync annotation pins whenever the report-a-problem list changes.
+  useEffect(() => {
+    if (!sourcesAdded || !mapRef.current) return;
+    const src = mapRef.current.getSource(ANNOTATION_SOURCE_ID);
+    if (!src) return;
+    src.setData(annotationsToGeoJson(launchAnalysis?.annotations ?? []));
+  }, [launchAnalysis?.annotations, sourcesAdded]);
 
   // Update inspect-map layer visibility when its own inspectVisibleTypes change
   useEffect(() => {
