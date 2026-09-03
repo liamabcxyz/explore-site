@@ -46,6 +46,8 @@ Koschmieder 公式(文档 §5):`W = exp(-3.912·s̄/V)`,s̄ 为代表性斜距,V
 
 # 地图页卡顿与误选高亮
 
+> **状态更新（2026-09-03）**：P0（误选）和 P0（mousemove hit-test）都已修完，P1（Worker + 建筑裁剪 + Rust/WASM 化）也全部落地。剩下 P2（Explore/Inspect 双图）还开着。下面的"根因"叙述保留原样作为历史记录；每条 P0/P1/P2 的实际状态见下面的清单。
+
 点地图会整片飘红、拖动/放发射点会卡，是同一类问题：**原站的"点谁高亮谁"调试交互，和 VANTAGE 的辐射分析叠在同一张图上，而且可见度还在主线程算。** 不是瓦片坏了，也不是辐射圈画错了。
 
 根因有两支，体感上绑在一起：
@@ -55,9 +57,10 @@ Koschmieder 公式(文档 §5):`W = exp(-3.912·s̄/V)`,s̄ 为代表性斜距,V
 
 分步（先交互误伤，再计算）：
 
-- **P0 拦住误选（一半已完成）**：这条其实是两个独立成因。**大面积 `land`/`water`/`land_cover` 退出可点高亮——已完成**（13 个填充图层的 `overture:selectable` 改成 `false`，`bathymetry` 8 个深度带发现已经是 `false` 了，不知道谁改的；实现见 `notes.md` 第 14 节），"整片飘红"这个症状已经解决。**"放发射点/选观察点时不要走 MapView 的要素选取"——还没做**，这条要动 `MapView.jsx` 既有点击处理器本身，跟其它 VANTAGE 改动"只加独立 effect、不碰核心逻辑"的原则不一样，值得单独做单独测，见 `ai_reports/2026-08-30-todo-analysis.md`。
-- **P0 去掉全图层 mousemove hit-test**：拖地图会立刻顺很多。VANTAGE 不需要"悬停任何要素都变手型"。（还没做，同样要动 `MapView.jsx`。）
+- **P0 拦住误选 —— 已完成**：两个独立成因都收了。（a）大面积 `land`/`water`/`land_cover` 退出可点高亮 —— 13 个填充图层的 `overture:selectable` 改成 `false`（`bathymetry` 8 个深度带发现已经是 `false` 了，不知道谁改的），"整片飘红"这个症状解决，见 commit `fed8db54` 和 `notes.md` 第 14 节。（b）放发射点/选观察点时不要走 MapView 的要素选取 —— 引入 `lib/launchClickCapture.js` + `LaunchProvider` 里的 `isVantageClickAt` ref，`MapView.jsx` 的 click handler 早退，见 commit `48224d73`。
+- **P0 去掉全图层 mousemove hit-test —— 已完成**：原来 60+ 次/秒 hit-test 全部 interactive 图层只为切换 pointer cursor 的那段直接删了，光标保持 maplibre 默认。`MapView.jsx` 里现在只剩死代码注释解释为什么删。
 - **P1 裁建筑 + Worker —— 已完成**：建筑查询裁到分析半径内（`lib/geo/buildingsNearPoint.js`），`computeViewshed` 挪进 `lib/viewshed/worker.js` 跑（原来写好但没接的那个）。点发射点不再冻住主线程。实现见 `notes.md`。
+- **P1 Worker 计算 Rust/WASM 化 —— 已完成**（2026-09-02/03，C1-C6 共 6 个 commit，`4d481051` 是把默认切到 WASM 的收官）：`wasm/vantage-core/` 是整个 `lib/viewshed/computeViewshed / computeRooftopLayer / computeSightlineProfile` 的 Rust 端口，wasm-pack 打包成 `vantage-core` npm 依赖，worker 里 async import。真实场景（Manhattan Macy's, 7170 buildings, 2220 cells）：JS grid 19ms + rooftop 5058ms → WASM grid 3.3ms + rooftop 110ms，**总加速 44×，每次发射点点击的 5 秒 wait 变 110ms**。`impl=wasm` 默认，`?impl=js` 逃生舱，`?impl=both` 每 cell diff。self-check 每次 worker 启动跑 29 项跨语言校验 bit-parity。rooftop 的 45× 里，Rust 本身贡献 ~6×，另 ~8× 来自把 `BuildingIndex` 用在 JS 显式跳过的路径上——JS 注释说"6.5K outer × any inner is cheap"，那个判断是错的。
 - **P2 拆掉 Explore/Inspect 双图**：v0.2 本来就要删对比滑条，现在还在付双倍 GPU/瓦片。动 `MapView.jsx` 最深，单独做。（还没做。）
 
 ---
