@@ -43,6 +43,20 @@ export function projectLocalX(origin_lat: number, origin_lng: number, lat: numbe
 export function projectLocalY(origin_lat: number, origin_lng: number, lat: number, lng: number): number;
 
 /**
+ * Returns [n_buildings, total_verts, sum_heights, min_x, max_x, min_y, max_y].
+ * Empty input returns [0, 0, 0, +Inf, -Inf, +Inf, -Inf].
+ */
+export function roundtripBuildings(heights: Float32Array, vertex_counts: Uint32Array, vertex_data: Float64Array): Float64Array;
+
+/**
+ * Returns [cells_x, cells_y, south_lat, east_lng, sum_of_data].
+ * `sum_of_data` is the reduction that catches any silent per-pixel
+ * corruption (a mismatched Float32Array view would give a totally
+ * different sum). NaN row on shape/length failure.
+ */
+export function roundtripTerrain(data: Float32Array, cells_x: number, cells_y: number, north_lat: number, west_lng: number, lat_step_deg: number, lng_step_deg: number): Float64Array;
+
+/**
  * Composite score. `weather` defaults to 1 on the JS side; wasm-bindgen
  * doesn't support optional args cleanly, so callers always pass it. The
  * only current caller (computeViewshed loops) always has the value in

@@ -206,6 +206,50 @@ export function projectLocalY(origin_lat, origin_lng, lat, lng) {
 }
 
 /**
+ * Returns [n_buildings, total_verts, sum_heights, min_x, max_x, min_y, max_y].
+ * Empty input returns [0, 0, 0, +Inf, -Inf, +Inf, -Inf].
+ * @param {Float32Array} heights
+ * @param {Uint32Array} vertex_counts
+ * @param {Float64Array} vertex_data
+ * @returns {Float64Array}
+ */
+export function roundtripBuildings(heights, vertex_counts, vertex_data) {
+    const ptr0 = passArrayF32ToWasm0(heights, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray32ToWasm0(vertex_counts, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF64ToWasm0(vertex_data, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.roundtripBuildings(ptr0, len0, ptr1, len1, ptr2, len2);
+    var v4 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v4;
+}
+
+/**
+ * Returns [cells_x, cells_y, south_lat, east_lng, sum_of_data].
+ * `sum_of_data` is the reduction that catches any silent per-pixel
+ * corruption (a mismatched Float32Array view would give a totally
+ * different sum). NaN row on shape/length failure.
+ * @param {Float32Array} data
+ * @param {number} cells_x
+ * @param {number} cells_y
+ * @param {number} north_lat
+ * @param {number} west_lng
+ * @param {number} lat_step_deg
+ * @param {number} lng_step_deg
+ * @returns {Float64Array}
+ */
+export function roundtripTerrain(data, cells_x, cells_y, north_lat, west_lng, lat_step_deg, lng_step_deg) {
+    const ptr0 = passArrayF32ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.roundtripTerrain(ptr0, len0, cells_x, cells_y, north_lat, west_lng, lat_step_deg, lng_step_deg);
+    var v2 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v2;
+}
+
+/**
  * Composite score. `weather` defaults to 1 on the JS side; wasm-bindgen
  * doesn't support optional args cleanly, so callers always pass it. The
  * only current caller (computeViewshed loops) always has the value in
@@ -263,6 +307,21 @@ function getFloat64ArrayMemory0() {
         cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
     }
     return cachedFloat64ArrayMemory0;
+}
+
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
+}
+
+function passArray32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passArrayF32ToWasm0(arg, malloc) {

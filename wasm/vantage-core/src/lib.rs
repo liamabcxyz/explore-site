@@ -19,6 +19,8 @@ mod building_index;
 mod elevation_grid;
 pub mod geo;
 mod sightline;
+// C3 — JS ↔ Rust data marshaling
+mod marshaling;
 
 // Re-export the wasm-bindgen surface. wasm-bindgen only walks the crate
 // root for exports, so every function that needs to be callable from JS
@@ -31,4 +33,5 @@ pub use scoring::{
     angular_size_gate, apparent_angular_diameter_deg, comfort_factor, elevation_angle_deg,
     elevation_score, eye_height, fraction_visible, is_blocked, score, visibility_category,
 };
+pub use marshaling::{roundtrip_buildings, roundtrip_terrain};
 pub use sightline::intersect_segment_building_flat;

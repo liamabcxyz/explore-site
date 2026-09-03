@@ -19,6 +19,8 @@ export const projectLatLngLat: (a: number, b: number, c: number, d: number) => n
 export const projectLatLngLng: (a: number, b: number, c: number, d: number) => number;
 export const projectLocalX: (a: number, b: number, c: number, d: number) => number;
 export const projectLocalY: (a: number, b: number, c: number, d: number) => number;
+export const roundtripBuildings: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+export const roundtripTerrain: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
 export const score: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
 export const visibility_category: (a: number, b: number) => number;
 export const __wbindgen_externrefs: WebAssembly.Table;
