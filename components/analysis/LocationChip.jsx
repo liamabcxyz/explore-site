@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import { Box, Link, Stack, Tooltip, Typography } from "@mui/material";
-import { describeLocation } from "@/lib/geo/reverseGeocode";
+import { describeLocation, needsRefine, refineWithNominatim } from "@/lib/geo/reverseGeocode";
 
 /**
  * Small "where you're standing" strip: an inline address/name resolved
@@ -16,10 +16,10 @@ import { describeLocation } from "@/lib/geo/reverseGeocode";
  */
 export default function LocationChip({ map, coord, dense = false }) {
   const [copied, setCopied] = useState(false);
-
-  // Re-derive whenever the point moves. `map` reference is stable
-  // across renders once the map is loaded, so it's not the trigger.
-  const info = useMemo(() => {
+  // Local (immediate) resolve first — populates the chip on the same
+  // frame the point moves. Nominatim refine (below) then upgrades the
+  // display if the local result was just "Near {road}" or coords.
+  const localInfo = useMemo(() => {
     if (!map || !coord) return null;
     try {
       return describeLocation(map, coord);
@@ -34,6 +34,21 @@ export default function LocationChip({ map, coord, dense = false }) {
       };
     }
   }, [map, coord?.lat, coord?.lng]);
+
+  const [refined, setRefined] = useState(null);
+  useEffect(() => {
+    // Reset refined result whenever the point moves — otherwise the
+    // previous point's Nominatim answer keeps showing for a frame.
+    setRefined(null);
+    if (!coord || !localInfo || !needsRefine(localInfo)) return undefined;
+    let cancelled = false;
+    refineWithNominatim(coord).then((r) => {
+      if (!cancelled && r) setRefined(r);
+    });
+    return () => { cancelled = true; };
+  }, [coord?.lat, coord?.lng, localInfo]);
+
+  const info = refined ?? localInfo;
 
   // Auto-clear the "Copied" tooltip after 1.5s so the UI doesn't get
   // stuck in the confirmation state.

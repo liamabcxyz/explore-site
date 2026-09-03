@@ -12,7 +12,7 @@ import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
 import { filterBuildingsNearPoint } from "@/lib/geo/buildingsNearPoint";
 import { loadBuildingsAlongCorridor, CORRIDOR_BUFFER_METERS } from "@/lib/geo/corridorBuildings";
-import { describeLocation } from "@/lib/geo/reverseGeocode";
+import { describeLocation, needsRefine, refineWithNominatim } from "@/lib/geo/reverseGeocode";
 import { findRooftopBase, findBuildingAt } from "@/lib/geo/rooftopBase";
 import { METERS_PER_FLOOR } from "@/lib/geo/normalizeBuilding";
 import { reportViewshedPerf } from "@/lib/perf";
@@ -745,16 +745,18 @@ export default function LaunchPointControl() {
         head.style.cssText = "font-size:11px;color:#555;margin-bottom:4px;";
         head.textContent = `#${spot.rank}  ·  quality ${Math.round(spot.score * 100)}%`;
         wrap.appendChild(head);
+        // Kept as mutable references so the Nominatim refine below can
+        // swap their text in place when it lands, without rebuilding
+        // the popup DOM.
         const primary = document.createElement("div");
         primary.style.cssText = "font-size:13px;font-weight:600;margin-bottom:2px;";
         primary.textContent = `📍 ${info.primary}`;
         wrap.appendChild(primary);
-        if (info.secondary) {
-          const sec = document.createElement("div");
-          sec.style.cssText = "font-size:11px;color:#666;margin-bottom:6px;";
-          sec.textContent = info.secondary;
-          wrap.appendChild(sec);
-        }
+        const sec = document.createElement("div");
+        sec.style.cssText = "font-size:11px;color:#666;margin-bottom:6px;";
+        sec.textContent = info.secondary || "";
+        if (!info.secondary) sec.style.display = "none";
+        wrap.appendChild(sec);
         const row = document.createElement("div");
         row.style.cssText = "display:flex;gap:10px;font-size:12px;margin-top:4px;";
         const link = document.createElement("a");
@@ -778,10 +780,25 @@ export default function LaunchPointControl() {
         });
         row.appendChild(copyBtn);
         wrap.appendChild(row);
-        new maplibregl.Popup({ offset: 20, closeButton: true, maxWidth: "280px" })
+        const popup = new maplibregl.Popup({ offset: 20, closeButton: true, maxWidth: "280px" })
           .setLngLat([spot.lng, spot.lat])
           .setDOMContent(wrap)
           .addTo(map);
+        // Async door-number refine. Only fires when local resolve
+        // didn't already produce a POI-quality address, and the popup
+        // is still open when the fetch lands — avoids updating stale
+        // DOM if the user closed it. See lib/geo/reverseGeocode.js
+        // for the Nominatim rate-limit note.
+        if (needsRefine(info)) {
+          refineWithNominatim({ lat: spot.lat, lng: spot.lng }).then((refined) => {
+            if (!refined || !popup.isOpen()) return;
+            primary.textContent = `📍 ${refined.primary}`;
+            if (refined.secondary) {
+              sec.textContent = refined.secondary;
+              sec.style.display = "";
+            }
+          });
+        }
       });
 
       topSpotMarkersRef.current.push(marker);
