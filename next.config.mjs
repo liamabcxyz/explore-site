@@ -29,10 +29,14 @@ const nextConfig = {
     unoptimized: true,
   },
   webpack(config) {
-    // Enable WebAssembly for @geoarrow/geoarrow-wasm
+    // Enable WebAssembly for @geoarrow/geoarrow-wasm + vantage-core.
+    // topLevelAwait is needed because wasm-bindgen's bundler-target glue
+    // does synchronous WebAssembly.instantiate at module top level, which
+    // webpack surfaces as a top-level await in the generated code.
     config.experiments = {
       ...config.experiments,
       asyncWebAssembly: true,
+      topLevelAwait: true,
     };
 
     // Handle SVG imports as React components (replaces vite-plugin-svgr)
@@ -58,9 +62,14 @@ const nextConfig = {
     // Modify the file loader rule to ignore *.svg
     fileLoaderRule.exclude = /\.svg$/i;
 
-    // Handle .wasm?url imports
+    // Handle .wasm?url imports (returns the file URL as a string). Scoped
+    // to the `?url` query so it doesn't collide with the standard
+    // asyncWebAssembly path used by wasm-bindgen packages (see
+    // wasm/vantage-core/pkg/vantage_core.js — `import * as wasm from ...`
+    // relies on webpack's built-in `webassembly/async` module type).
     config.module.rules.push({
       test: /\.wasm$/,
+      resourceQuery: /url/,
       type: "asset/resource",
     });
 

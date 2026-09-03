@@ -6,6 +6,7 @@
     "dev": "next dev --webpack",
     "postinstall": "node scripts/copy-maplibre-assets.mjs",
     "build": "next build --webpack",
+    "build:wasm": "cd wasm/vantage-core && wasm-pack build --target bundler --release",
     "build:schema": "node scripts/dont-dream-its-overture.mjs --build-schema",
     "build:tiles": "node scripts/dont-dream-its-overture.mjs --build-tiles",
     "audit:style": "node scripts/dont-dream-its-overture.mjs --validate-style",
@@ -39,7 +40,8 @@
     "prop-types": "^15.8.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "stac-js": "^0.5.5"
+    "stac-js": "^0.5.5",
+    "vantage-core": "file:./wasm/vantage-core/pkg"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
