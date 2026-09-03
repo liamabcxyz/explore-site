@@ -182,6 +182,7 @@
     "water": {
       "color": {
         "line": "$semantic.waterway.primary",
+        "ferry": "$semantic.waterway.ferry",
         "text": "$semantic.waterway.label",
         "textHalo": "$semantic.waterway.labelHalo"
       }

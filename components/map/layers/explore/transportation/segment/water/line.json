@@ -2,38 +2,28 @@
   "type": "line",
   "source": "transportation",
   "source-layer": "segment",
-  "minzoom": 12,
+  "minzoom": 10,
   "filter": [
     "==",
-    [
-      "get",
-      "subtype"
-    ],
+    ["get", "subtype"],
     "water"
   ],
   "paint": {
-    "line-color": "$transportation.water.color.line",
+    "line-color": "$transportation.water.color.ferry",
     "line-width": [
       "interpolate",
-      [
-        "exponential",
-        1.5
-      ],
-      [
-        "zoom"
-      ],
-      10,
-      0.2,
-      12,
-      0.5,
-      16,
-      2,
-      20,
-      4
-    ]
+      ["exponential", 1.5],
+      ["zoom"],
+      10, 0.8,
+      12, 1.4,
+      16, 2.5,
+      20, 4.5
+    ],
+    "line-dasharray": [3, 3],
+    "line-opacity": 0.85
   },
   "layout": {
-    "line-cap": "round",
+    "line-cap": "butt",
     "line-join": "round"
   },
   "metadata": {

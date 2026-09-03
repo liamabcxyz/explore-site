@@ -91,6 +91,7 @@
   },
   "waterway": {
     "primary": "$globals.color.steel.300-40%",
+    "ferry": "$globals.color.steel.900",
     "label": "$globals.color.sand.900",
     "labelHalo": "$globals.color.white.50-70%"
   },
