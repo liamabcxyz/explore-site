@@ -50,6 +50,43 @@ export function comfort_factor(theta_deg, phi_deg) {
 }
 
 /**
+ * See module-doc for the output layout. Empty Vec on shape error.
+ * @param {number} launch_lat
+ * @param {number} launch_lng
+ * @param {number} target_height
+ * @param {number} shell_radius
+ * @param {number} analysis_radius
+ * @param {number} radial_spacing
+ * @param {number} angular_spacing_deg
+ * @param {Float32Array} heights
+ * @param {Uint32Array} vertex_counts
+ * @param {Float64Array} vertex_data
+ * @param {number} has_terrain
+ * @param {Float32Array} terrain_data
+ * @param {number} terrain_cells_x
+ * @param {number} terrain_cells_y
+ * @param {number} terrain_north_lat
+ * @param {number} terrain_west_lng
+ * @param {number} terrain_lat_step_deg
+ * @param {number} terrain_lng_step_deg
+ * @returns {Float64Array}
+ */
+export function computeViewshed(launch_lat, launch_lng, target_height, shell_radius, analysis_radius, radial_spacing, angular_spacing_deg, heights, vertex_counts, vertex_data, has_terrain, terrain_data, terrain_cells_x, terrain_cells_y, terrain_north_lat, terrain_west_lng, terrain_lat_step_deg, terrain_lng_step_deg) {
+    const ptr0 = passArrayF32ToWasm0(heights, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray32ToWasm0(vertex_counts, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF64ToWasm0(vertex_data, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArrayF32ToWasm0(terrain_data, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.computeViewshed(launch_lat, launch_lng, target_height, shell_radius, analysis_radius, radial_spacing, angular_spacing_deg, ptr0, len0, ptr1, len1, ptr2, len2, has_terrain, ptr3, len3, terrain_cells_x, terrain_cells_y, terrain_north_lat, terrain_west_lng, terrain_lat_step_deg, terrain_lng_step_deg);
+    var v5 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v5;
+}
+
+/**
  * @param {number} distance_meters
  * @returns {number}
  */

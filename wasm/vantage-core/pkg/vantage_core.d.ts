@@ -11,6 +11,11 @@ export function apparent_angular_diameter_deg(horizontal_distance: number, heigh
 
 export function comfort_factor(theta_deg: number, phi_deg: number): number;
 
+/**
+ * See module-doc for the output layout. Empty Vec on shape error.
+ */
+export function computeViewshed(launch_lat: number, launch_lng: number, target_height: number, shell_radius: number, analysis_radius: number, radial_spacing: number, angular_spacing_deg: number, heights: Float32Array, vertex_counts: Uint32Array, vertex_data: Float64Array, has_terrain: number, terrain_data: Float32Array, terrain_cells_x: number, terrain_cells_y: number, terrain_north_lat: number, terrain_west_lng: number, terrain_lat_step_deg: number, terrain_lng_step_deg: number): Float64Array;
+
 export function curvature_drop(distance_meters: number): number;
 
 export function curvature_drop_k(distance_meters: number, k: number): number;

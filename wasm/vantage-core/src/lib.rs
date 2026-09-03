@@ -21,6 +21,8 @@ pub mod geo;
 mod sightline;
 // C3 — JS ↔ Rust data marshaling
 mod marshaling;
+// C4 — compute_viewshed (polar sector×ring grid)
+mod viewshed;
 
 // Re-export the wasm-bindgen surface. wasm-bindgen only walks the crate
 // root for exports, so every function that needs to be callable from JS
@@ -35,3 +37,4 @@ pub use scoring::{
 };
 pub use marshaling::{roundtrip_buildings, roundtrip_terrain};
 pub use sightline::intersect_segment_building_flat;
+pub use viewshed::compute_viewshed_wasm;
