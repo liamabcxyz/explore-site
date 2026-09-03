@@ -77,11 +77,21 @@ export default function PerfOverlay() {
       {viewshed ? (
         <>
           <Box>query: {viewshed.queryMs.toFixed(0)}ms ({viewshed.buildingCount} bldgs)</Box>
+          {typeof viewshed.buildingsMs === "number" && typeof viewshed.terrainMs === "number" && (
+            <Box sx={{ color: "#aaa", paddingLeft: 1 }}>
+              bldg: {viewshed.buildingsMs.toFixed(0)}ms · terrain: {viewshed.terrainMs.toFixed(0)}ms
+            </Box>
+          )}
           <Box>compute: {viewshed.computeMs.toFixed(0)}ms ({viewshed.cellCount} cells)</Box>
+          {typeof viewshed.renderMs === "number" && (
+            <Box>render: {viewshed.renderMs.toFixed(0)}ms (setData → idle)</Box>
+          )}
           {typeof viewshed.avgCandidates === "number" && (
             <Box>index: {viewshed.avgCandidates.toFixed(0)} avg candidates/cell</Box>
           )}
-          <Box sx={{ color: "#fff" }}>total: {(viewshed.queryMs + viewshed.computeMs).toFixed(0)}ms</Box>
+          <Box sx={{ color: "#fff" }}>
+            total: {(viewshed.queryMs + viewshed.computeMs + (viewshed.renderMs ?? 0)).toFixed(0)}ms
+          </Box>
         </>
       ) : (
         <Typography sx={{ fontFamily: "inherit", fontSize: "inherit", color: "#aaa" }}>

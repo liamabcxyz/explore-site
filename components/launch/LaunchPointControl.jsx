@@ -750,6 +750,17 @@ export default function LaunchPointControl() {
     const terrainProjector = makeLocalProjector(launch.lat, launch.lng);
     const ne = terrainProjector.toLatLng(ANALYSIS_RADIUS, ANALYSIS_RADIUS);
     const sw = terrainProjector.toLatLng(-ANALYSIS_RADIUS, -ANALYSIS_RADIUS);
+    // Individually-timed so the perf report can split "building query" and
+    // "terrain load" — the outer Promise.all only sees `max(building, terrain)`,
+    // which hides which one was the actual bottleneck.
+    let buildingsMs = 0;
+    let terrainMs = 0;
+    const buildingsStart = performance.now();
+    const buildingsPromise = hiddenSource.query(launch, ANALYSIS_RADIUS).then((r) => {
+      buildingsMs = performance.now() - buildingsStart;
+      return r;
+    });
+    const terrainStart = performance.now();
     const terrainPromise = loadElevationGridForBounds({
       westLng: sw.lng,
       southLat: sw.lat,
@@ -762,10 +773,13 @@ export default function LaunchPointControl() {
       // no output at all.
       console.warn("terrain load failed, falling back to flat ground:", err);
       return null;
+    }).then((r) => {
+      terrainMs = performance.now() - terrainStart;
+      return r;
     });
 
     Promise.all([
-      hiddenSource.query(launch, ANALYSIS_RADIUS),
+      buildingsPromise,
       terrainPromise,
     ]).then(([{ buildingFeats, partFeats }, terrainGrid]) => {
       if (cancelled || requestId !== requestIdRef.current) return; // superseded by a newer request
@@ -814,16 +828,28 @@ export default function LaunchPointControl() {
           }
           const computeMs = performance.now() - computeStart;
           const { grid, rooftop: rooftopLayer } = e.data;
+          // Render segment (D) — from the moment we hand the FeatureCollection
+          // to MapLibre until the map is fully repainted. `idle` fires once
+          // every pending source-load / tile-process / render frame has
+          // drained. Time here is what "clicking a launch pin and seeing the
+          // heatmap" adds beyond the worker's compute.
+          const renderStart = performance.now();
           map.getSource(SOURCE_ID).setData(grid);
           if (map.getSource(ROOFTOP_SOURCE_ID)) map.getSource(ROOFTOP_SOURCE_ID).setData(rooftopLayer);
           setTopSpots(pickTopSpots(grid.features));
-          reportViewshedPerf({
-            queryMs,
-            computeMs,
-            buildingCount: buildings.length,
-            cellCount: grid.features.length,
-            rooftopCount: rooftopLayer.features.length,
-            avgCandidates: grid.avgCandidates,
+          map.once("idle", () => {
+            const renderMs = performance.now() - renderStart;
+            reportViewshedPerf({
+              queryMs,
+              buildingsMs,
+              terrainMs,
+              computeMs,
+              renderMs,
+              buildingCount: buildings.length,
+              cellCount: grid.features.length,
+              rooftopCount: rooftopLayer.features.length,
+              avgCandidates: grid.avgCandidates,
+            });
           });
         },
         { once: true }
