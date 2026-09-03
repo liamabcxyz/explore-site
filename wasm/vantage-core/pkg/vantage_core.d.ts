@@ -15,6 +15,13 @@ export function curvature_drop(distance_meters: number): number;
 
 export function curvature_drop_k(distance_meters: number, k: number): number;
 
+/**
+ * Test-only: bilinear elevation lookup returning `f64::NAN` outside
+ * coverage (rather than `null`, since we can't return Option across
+ * the wasm-bindgen boundary as one f64 easily).
+ */
+export function elevationBilinear(data: Float32Array, cells_x: number, cells_y: number, north_lat: number, west_lng: number, lat_step_deg: number, lng_step_deg: number, lng: number, lat: number): number;
+
 export function elevation_angle_deg(horizontal_distance: number, height_diff: number): number;
 
 export function elevation_score(phi_deg: number): number;
@@ -22,6 +29,8 @@ export function elevation_score(phi_deg: number): number;
 export function eyeHeight(): number;
 
 export function fraction_visible(min_alt: number, target_height: number, shell_radius: number): number;
+
+export function intersectSegmentBuildingFlat(ox: number, oy: number, oz: number, tx: number, ty: number, tz: number, footprint_xy: Float64Array, height: number): Float64Array;
 
 export function is_blocked(frac: number): boolean;
 

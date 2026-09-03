@@ -69,6 +69,28 @@ export function curvature_drop_k(distance_meters, k) {
 }
 
 /**
+ * Test-only: bilinear elevation lookup returning `f64::NAN` outside
+ * coverage (rather than `null`, since we can't return Option across
+ * the wasm-bindgen boundary as one f64 easily).
+ * @param {Float32Array} data
+ * @param {number} cells_x
+ * @param {number} cells_y
+ * @param {number} north_lat
+ * @param {number} west_lng
+ * @param {number} lat_step_deg
+ * @param {number} lng_step_deg
+ * @param {number} lng
+ * @param {number} lat
+ * @returns {number}
+ */
+export function elevationBilinear(data, cells_x, cells_y, north_lat, west_lng, lat_step_deg, lng_step_deg, lng, lat) {
+    const ptr0 = passArrayF32ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.elevationBilinear(ptr0, len0, cells_x, cells_y, north_lat, west_lng, lat_step_deg, lng_step_deg, lng, lat);
+    return ret;
+}
+
+/**
  * @param {number} horizontal_distance
  * @param {number} height_diff
  * @returns {number}
@@ -104,6 +126,26 @@ export function eyeHeight() {
 export function fraction_visible(min_alt, target_height, shell_radius) {
     const ret = wasm.fraction_visible(min_alt, target_height, shell_radius);
     return ret;
+}
+
+/**
+ * @param {number} ox
+ * @param {number} oy
+ * @param {number} oz
+ * @param {number} tx
+ * @param {number} ty
+ * @param {number} tz
+ * @param {Float64Array} footprint_xy
+ * @param {number} height
+ * @returns {Float64Array}
+ */
+export function intersectSegmentBuildingFlat(ox, oy, oz, tx, ty, tz, footprint_xy, height) {
+    const ptr0 = passArrayF64ToWasm0(footprint_xy, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.intersectSegmentBuildingFlat(ox, oy, oz, tx, ty, tz, ptr0, len0, height);
+    var v2 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v2;
 }
 
 /**
@@ -202,6 +244,43 @@ export function __wbindgen_init_externref_table() {
     table.set(offset + 2, true);
     table.set(offset + 3, false);
 }
+function getArrayF64FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
+}
+
+let cachedFloat32ArrayMemory0 = null;
+function getFloat32ArrayMemory0() {
+    if (cachedFloat32ArrayMemory0 === null || cachedFloat32ArrayMemory0.byteLength === 0) {
+        cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
+    }
+    return cachedFloat32ArrayMemory0;
+}
+
+let cachedFloat64ArrayMemory0 = null;
+function getFloat64ArrayMemory0() {
+    if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
+        cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
+    }
+    return cachedFloat64ArrayMemory0;
+}
+
+function passArrayF32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayF64ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 8, 8) >>> 0;
+    getFloat64ArrayMemory0().set(arg, ptr / 8);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+let WASM_VECTOR_LEN = 0;
+
 
 let wasm;
 export function __wbg_set_wasm(val) {
