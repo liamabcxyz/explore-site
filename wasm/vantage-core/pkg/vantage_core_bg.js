@@ -50,6 +50,110 @@ export function comfort_factor(theta_deg, phi_deg) {
 }
 
 /**
+ * Per-building rooftop scores. Buildings ride the same three-array
+ * packing as computeViewshed; terrain rides the same 7-scalars +
+ * has_terrain flag pattern. Output is a flat Float64Array of length
+ * `3 * num_buildings`.
+ * @param {number} launch_lat
+ * @param {number} launch_lng
+ * @param {number} target_height
+ * @param {number} shell_radius
+ * @param {Float32Array} heights
+ * @param {Uint32Array} vertex_counts
+ * @param {Float64Array} vertex_data
+ * @param {number} has_terrain
+ * @param {Float32Array} terrain_data
+ * @param {number} terrain_cells_x
+ * @param {number} terrain_cells_y
+ * @param {number} terrain_north_lat
+ * @param {number} terrain_west_lng
+ * @param {number} terrain_lat_step_deg
+ * @param {number} terrain_lng_step_deg
+ * @returns {Float64Array}
+ */
+export function computeRooftopLayer(launch_lat, launch_lng, target_height, shell_radius, heights, vertex_counts, vertex_data, has_terrain, terrain_data, terrain_cells_x, terrain_cells_y, terrain_north_lat, terrain_west_lng, terrain_lat_step_deg, terrain_lng_step_deg) {
+    const ptr0 = passArrayF32ToWasm0(heights, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray32ToWasm0(vertex_counts, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF64ToWasm0(vertex_data, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArrayF32ToWasm0(terrain_data, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.computeRooftopLayer(launch_lat, launch_lng, target_height, shell_radius, ptr0, len0, ptr1, len1, ptr2, len2, has_terrain, ptr3, len3, terrain_cells_x, terrain_cells_y, terrain_north_lat, terrain_west_lng, terrain_lat_step_deg, terrain_lng_step_deg);
+    var v5 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v5;
+}
+
+/**
+ * Compute a sightline profile.
+ *
+ * Buildings ride the same three-array packing as computeViewshed /
+ * computeRooftopLayer; terrain rides the same 7-scalars + `has_terrain`
+ * flag. `observer_height` is the observer's height above their
+ * ground (matches JS's default of EYE_HEIGHT = 1.6 when unset).
+ *
+ * Return format — one flat Float64Array:
+ *
+ * ```text
+ * [0..14):  header
+ *   0  total_distance
+ *   1  launch_elev
+ *   2  observer_ground_elev
+ *   3  observer_abs_alt
+ *   4  target_abs_alt
+ *   5  target_apparent_alt
+ *   6  min_alt              (-Infinity when no blockers)
+ *   7  frac
+ *   8  theta
+ *   9  phi
+ *   10 score
+ *   11 category              (0=blocked, 1=poor-angle, 2=partial, 3=good)
+ *   12 num_hits
+ *   13 num_terrain_points
+ *
+ * [14 .. 14 + 4*num_hits):    hits, each = [bldg_idx, distance, req, abs_height]
+ * [ .. + 2*num_terrain_points): terrain samples, each = [distance, elevation]
+ * ```
+ *
+ * Empty Vec on shape error from the marshaling layer.
+ * @param {number} launch_lat
+ * @param {number} launch_lng
+ * @param {number} observer_lat
+ * @param {number} observer_lng
+ * @param {number} target_height
+ * @param {number} shell_radius
+ * @param {number} observer_height
+ * @param {Float32Array} heights
+ * @param {Uint32Array} vertex_counts
+ * @param {Float64Array} vertex_data
+ * @param {number} has_terrain
+ * @param {Float32Array} terrain_data
+ * @param {number} terrain_cells_x
+ * @param {number} terrain_cells_y
+ * @param {number} terrain_north_lat
+ * @param {number} terrain_west_lng
+ * @param {number} terrain_lat_step_deg
+ * @param {number} terrain_lng_step_deg
+ * @returns {Float64Array}
+ */
+export function computeSightlineProfile(launch_lat, launch_lng, observer_lat, observer_lng, target_height, shell_radius, observer_height, heights, vertex_counts, vertex_data, has_terrain, terrain_data, terrain_cells_x, terrain_cells_y, terrain_north_lat, terrain_west_lng, terrain_lat_step_deg, terrain_lng_step_deg) {
+    const ptr0 = passArrayF32ToWasm0(heights, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray32ToWasm0(vertex_counts, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF64ToWasm0(vertex_data, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArrayF32ToWasm0(terrain_data, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.computeSightlineProfile(launch_lat, launch_lng, observer_lat, observer_lng, target_height, shell_radius, observer_height, ptr0, len0, ptr1, len1, ptr2, len2, has_terrain, ptr3, len3, terrain_cells_x, terrain_cells_y, terrain_north_lat, terrain_west_lng, terrain_lat_step_deg, terrain_lng_step_deg);
+    var v5 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v5;
+}
+
+/**
  * See module-doc for the output layout. Empty Vec on shape error.
  * @param {number} launch_lat
  * @param {number} launch_lng
