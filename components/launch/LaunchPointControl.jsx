@@ -27,6 +27,15 @@ import { FIREWORKS_PRESETS } from "@/lib/fireworksPresets";
 // stac-js ESM import into any test transitively including this file.
 import { getPinnedReleaseId } from "@/lib/stacReleaseState";
 
+// Compute-backend selector: URL `?impl=js|wasm|both`. Read at request
+// time — flipping the URL and dropping a new pin re-routes immediately,
+// no reload needed. See lib/viewshed/worker.js for the dispatch.
+function readViewshedImpl() {
+  if (typeof window === "undefined") return "js";
+  const v = new URLSearchParams(window.location.search).get("impl");
+  return v === "wasm" || v === "both" ? v : "js";
+}
+
 // 1500m covers the full comfortable viewing ring even for a 12" shell.
 // Was dropped to 500m as a stopgap while placing a launch point froze the
 // main thread; now that computeViewshed runs in a Worker (lib/viewshed/worker.js)
@@ -855,6 +864,18 @@ export default function LaunchPointControl() {
         { once: true }
       );
       worker.postMessage({
+        // Compute-backend selector. Reads `?impl=js|wasm|both` from
+        // window.location at request time (not cached at mount) so
+        // flipping the URL and dropping a new launch pin re-dispatches
+        // immediately. Default `js` matches production. `wasm` uses the
+        // Rust/WASM port; `both` runs both implementations and diffs
+        // them cell-by-cell in the worker for validation. Empty and
+        // unknown values silently fall back to `js`.
+        //
+        // Until the Rust port of computeViewshed lands (phase C4),
+        // `wasm` and `both` degrade to `js` with a one-time console
+        // warning. See lib/viewshed/worker.js for the dispatch itself.
+        impl: readViewshedImpl(),
         launch,
         targetHeight: caliberHeight + rooftop,
         shellRadius,
