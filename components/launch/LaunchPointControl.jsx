@@ -30,10 +30,20 @@ import { getPinnedReleaseId } from "@/lib/stacReleaseState";
 // Compute-backend selector: URL `?impl=js|wasm|both`. Read at request
 // time — flipping the URL and dropping a new pin re-routes immediately,
 // no reload needed. See lib/viewshed/worker.js for the dispatch.
+//
+// Default is `wasm` post-C6: the Rust port matches JS bit-for-bit on
+// every measured scene and cuts a Macy's-scale click from ~5 s to
+// ~110 ms. `?impl=js` remains the escape hatch — the JS
+// implementations of computeViewshed / computeRooftopLayer stay in
+// the tree as the parity reference, and the worker silently falls
+// back to JS with a console warning if the WASM module fails to load
+// (dev env without asyncWebAssembly, browser missing WebAssembly).
+// SSR still returns "js" because there's no window and no Worker.
 function readViewshedImpl() {
   if (typeof window === "undefined") return "js";
   const v = new URLSearchParams(window.location.search).get("impl");
-  return v === "wasm" || v === "both" ? v : "js";
+  if (v === "js" || v === "wasm" || v === "both") return v;
+  return "wasm";
 }
 
 // 1500m covers the full comfortable viewing ring even for a 12" shell.
