@@ -7,6 +7,7 @@ import { EYE_HEIGHT } from "@/lib/viewshed/scoring";
 import { apparentAltitude } from "@/lib/viewshed/curvature";
 import { PROFILE_DOCK_CHART_PX, PROFILE_DOCK_HEADER_PX, PROFILE_DOCK_PROMPT_PX } from "@/components/analysis/profileDockMetrics";
 import ReportProblemDialog from "@/components/analysis/ReportProblemDialog";
+import LocationChip from "@/components/analysis/LocationChip";
 
 // Same red/yellow/green the map's own viewshed grid dots use (see the
 // circle-color paint expression in components/launch/LaunchPointControl.jsx)
@@ -557,8 +558,23 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
     </Stack>
   ) : null;
 
+  // Reverse-geocoded "where you're standing" — resolved from the
+  // Overture PMTiles the main map already has loaded (no network),
+  // plus a Google-Maps link so a user who wants to plan getting to
+  // this spot / share it with a friend doesn't have to switch tabs
+  // and re-locate by eye. See lib/geo/reverseGeocode.js.
+  const mapRef = typeof window !== "undefined" ? window.map : null;
+  const observerCoord = analysis.observer
+    ? { lat: analysis.observer.lat, lng: analysis.observer.lng }
+    : null;
+
   const copy = (
     <>
+      {observerCoord && (
+        <Box sx={{ mb: copyGap }}>
+          <LocationChip map={mapRef} coord={observerCoord} />
+        </Box>
+      )}
       {/* Mirror of the launch point's rooftop handling (todo.md P1-3), but
           for the observer's end of the sightline — a clicked point that sits
           on a building isn't necessarily viewed from ground level, and the
@@ -732,6 +748,11 @@ export default function ProfilePanel({ isDark, layout = "panel" }) {
           >
             {secondaryBits}
           </Typography>
+          {observerCoord && (
+            <Box sx={{ mt: 0.25 }}>
+              <LocationChip map={mapRef} coord={observerCoord} dense />
+            </Box>
+          )}
         </Stack>
         {analysis.loading && (
           <Typography variant="caption" sx={{ color: captionColor, flexShrink: 0 }}>

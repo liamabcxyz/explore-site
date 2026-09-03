@@ -5,7 +5,7 @@
 
 export const PROFILE_DOCK_HEIGHT_VAR = "--vantage-profile-dock-height";
 export const PROFILE_DOCK_PROMPT_PX = 44;
-export const PROFILE_DOCK_HEADER_PX = 56;
+export const PROFILE_DOCK_HEADER_PX = 76;
 export const PROFILE_DOCK_CHART_PX = 236;
 export const PROFILE_DOCK_OPEN_PX = PROFILE_DOCK_HEADER_PX + PROFILE_DOCK_CHART_PX;
 

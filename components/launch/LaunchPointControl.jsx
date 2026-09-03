@@ -12,6 +12,7 @@ import { makeLocalProjector } from "@/lib/geo/toLocalMeters";
 import { buildingsFromMapFeatures } from "@/lib/geo/overtureBuildingAdapter";
 import { filterBuildingsNearPoint } from "@/lib/geo/buildingsNearPoint";
 import { loadBuildingsAlongCorridor, CORRIDOR_BUFFER_METERS } from "@/lib/geo/corridorBuildings";
+import { describeLocation } from "@/lib/geo/reverseGeocode";
 import { findRooftopBase, findBuildingAt } from "@/lib/geo/rooftopBase";
 import { METERS_PER_FLOOR } from "@/lib/geo/normalizeBuilding";
 import { reportViewshedPerf } from "@/lib/perf";
@@ -708,6 +709,15 @@ export default function LaunchPointControl() {
   // effect from the animation so the two lifecycles don't fight — top
   // spots persist until the next analysis or clear, animations are
   // one-shot.
+  //
+  // Each marker attaches a click handler that opens a maplibre Popup
+  // with a reverse-geocoded "where you're standing" and a Google-Maps
+  // link — same info ProfilePanel shows for the observer point, but
+  // available for the three recommendations too so a user can pick
+  // one by name/address without needing to place an observer there
+  // first. Popup content is built as vanilla HTML rather than mounted
+  // React so we don't have to keep a React root per marker alive
+  // across re-renders of this effect.
   useEffect(() => {
     if (!map) return;
     for (const marker of topSpotMarkersRef.current) marker.remove();
@@ -718,10 +728,62 @@ export default function LaunchPointControl() {
       el.style.cssText =
         "width:24px;height:24px;border-radius:50%;background:#2e7d32;color:white;" +
         "display:flex;align-items:center;justify-content:center;font-weight:700;" +
-        "font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.35);border:2px solid white;";
+        "font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.35);border:2px solid white;" +
+        "cursor:pointer;";
       const marker = new maplibregl.Marker({ element: el, anchor: "center" })
         .setLngLat([spot.lng, spot.lat])
         .addTo(map);
+
+      el.addEventListener("click", (e) => {
+        e.stopPropagation(); // don't let this bubble as a map click
+        const info = describeLocation(map, { lat: spot.lat, lng: spot.lng });
+        // Popup DOM. Kept minimal: rank + score + line 1 (primary) +
+        // optional line 2 (secondary address) + link + copy button.
+        const wrap = document.createElement("div");
+        wrap.style.cssText = "font-family:Montserrat,sans-serif;min-width:200px;max-width:260px;";
+        const head = document.createElement("div");
+        head.style.cssText = "font-size:11px;color:#555;margin-bottom:4px;";
+        head.textContent = `#${spot.rank}  ·  quality ${Math.round(spot.score * 100)}%`;
+        wrap.appendChild(head);
+        const primary = document.createElement("div");
+        primary.style.cssText = "font-size:13px;font-weight:600;margin-bottom:2px;";
+        primary.textContent = `📍 ${info.primary}`;
+        wrap.appendChild(primary);
+        if (info.secondary) {
+          const sec = document.createElement("div");
+          sec.style.cssText = "font-size:11px;color:#666;margin-bottom:6px;";
+          sec.textContent = info.secondary;
+          wrap.appendChild(sec);
+        }
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:10px;font-size:12px;margin-top:4px;";
+        const link = document.createElement("a");
+        link.href = info.gmapsUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Open in Google Maps ↗";
+        row.appendChild(link);
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.textContent = "Copy link";
+        copyBtn.style.cssText =
+          "background:none;border:none;color:#1976d2;text-decoration:underline;" +
+          "cursor:pointer;font:inherit;padding:0;";
+        copyBtn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(info.gmapsUrl);
+            copyBtn.textContent = "Copied ✓";
+            setTimeout(() => { copyBtn.textContent = "Copy link"; }, 1500);
+          } catch { /* clipboard blocked — user still has the link */ }
+        });
+        row.appendChild(copyBtn);
+        wrap.appendChild(row);
+        new maplibregl.Popup({ offset: 20, closeButton: true, maxWidth: "280px" })
+          .setLngLat([spot.lng, spot.lat])
+          .setDOMContent(wrap)
+          .addTo(map);
+      });
+
       topSpotMarkersRef.current.push(marker);
     }
     return () => {
