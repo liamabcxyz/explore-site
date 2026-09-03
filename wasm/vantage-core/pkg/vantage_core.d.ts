@@ -1,13 +1,49 @@
 /* tslint:disable */
 /* eslint-disable */
 
-/**
- * Geometrically exact fraction of a shell's disk that sits above the
- * nearest obstruction. See 烟花可视性数学模型.md §3.2 for the derivation
- * and `lib/viewshed/scoring.js` for the JavaScript reference
- * implementation this mirrors.
- *
- * `k = (min_alt - target_height) / shell_radius` is the horizontal cut
- * line in units of R from the disk center. `f(k) = [acos(k) − k·√(1−k²)] / π`.
- */
+export function angular_size_gate(theta_deg: number): number;
+
+export function apparent_altitude(orthometric_meters: number, distance_meters: number): number;
+
+export function apparent_altitude_k(orthometric_meters: number, distance_meters: number, k: number): number;
+
+export function apparent_angular_diameter_deg(horizontal_distance: number, height_diff: number, shell_radius: number): number;
+
+export function comfort_factor(theta_deg: number, phi_deg: number): number;
+
+export function curvature_drop(distance_meters: number): number;
+
+export function curvature_drop_k(distance_meters: number, k: number): number;
+
+export function elevation_angle_deg(horizontal_distance: number, height_diff: number): number;
+
+export function elevation_score(phi_deg: number): number;
+
+export function eyeHeight(): number;
+
 export function fraction_visible(min_alt: number, target_height: number, shell_radius: number): number;
+
+export function is_blocked(frac: number): boolean;
+
+export function projectLatLngLat(origin_lat: number, origin_lng: number, x: number, y: number): number;
+
+export function projectLatLngLng(origin_lat: number, origin_lng: number, x: number, y: number): number;
+
+export function projectLocalX(origin_lat: number, origin_lng: number, lat: number, lng: number): number;
+
+export function projectLocalY(origin_lat: number, origin_lng: number, lat: number, lng: number): number;
+
+/**
+ * Composite score. `weather` defaults to 1 on the JS side; wasm-bindgen
+ * doesn't support optional args cleanly, so callers always pass it. The
+ * only current caller (computeViewshed loops) always has the value in
+ * hand, so no ergonomics loss.
+ */
+export function score(min_alt: number, target_height: number, shell_radius: number, eye_h: number, horizontal_distance: number, weather: number): number;
+
+/**
+ * Returns a small integer for the category so the wasm-bindgen boundary
+ * stays as a numeric primitive rather than allocating a JS string on
+ * every cell. JS side maps: 0=blocked, 1=poor-angle, 2=partial, 3=good.
+ */
+export function visibility_category(frac: number, comfort: number): number;
