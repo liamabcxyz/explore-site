@@ -46,7 +46,7 @@ Koschmieder 公式(文档 §5):`W = exp(-3.912·s̄/V)`,s̄ 为代表性斜距,V
 
 # 地图页卡顿与误选高亮
 
-> **状态更新（2026-09-03）**：P0（误选）和 P0（mousemove hit-test）都已修完，P1（Worker + 建筑裁剪 + Rust/WASM 化）也全部落地。剩下 P2（Explore/Inspect 双图）还开着。下面的"根因"叙述保留原样作为历史记录；每条 P0/P1/P2 的实际状态见下面的清单。
+> **状态更新（2026-09-03）**：P0（误选）、P0（mousemove hit-test）、P1（Worker + 建筑裁剪 + Rust/WASM 化）、P2（Explore/Inspect 双图运行时）全部落地——本章原本 flag 的四条症状都不再复现。剩下的只有"物理删除 Inspect 死代码"这个纯清洁性 refactor，是 opt-in、不属于原 P0-P2 的性能/交互诉求范围。下面的"根因"叙述保留原样作为历史记录；每条 P0/P1/P2 的实际状态见下面的清单。
 
 点地图会整片飘红、拖动/放发射点会卡，是同一类问题：**原站的"点谁高亮谁"调试交互，和 VANTAGE 的辐射分析叠在同一张图上，而且可见度还在主线程算。** 不是瓦片坏了，也不是辐射圈画错了。
 
@@ -61,7 +61,7 @@ Koschmieder 公式(文档 §5):`W = exp(-3.912·s̄/V)`,s̄ 为代表性斜距,V
 - **P0 去掉全图层 mousemove hit-test —— 已完成**：原来 60+ 次/秒 hit-test 全部 interactive 图层只为切换 pointer cursor 的那段直接删了，光标保持 maplibre 默认。`MapView.jsx` 里现在只剩死代码注释解释为什么删。
 - **P1 裁建筑 + Worker —— 已完成**：建筑查询裁到分析半径内（`lib/geo/buildingsNearPoint.js`），`computeViewshed` 挪进 `lib/viewshed/worker.js` 跑（原来写好但没接的那个）。点发射点不再冻住主线程。实现见 `notes.md`。
 - **P1 Worker 计算 Rust/WASM 化 —— 已完成**（2026-09-02/03，C1-C6 共 6 个 commit，`4d481051` 是把默认切到 WASM 的收官）：`wasm/vantage-core/` 是整个 `lib/viewshed/computeViewshed / computeRooftopLayer / computeSightlineProfile` 的 Rust 端口，wasm-pack 打包成 `vantage-core` npm 依赖，worker 里 async import。真实场景（Manhattan Macy's, 7170 buildings, 2220 cells）：JS grid 19ms + rooftop 5058ms → WASM grid 3.3ms + rooftop 110ms，**总加速 44×，每次发射点点击的 5 秒 wait 变 110ms**。`impl=wasm` 默认，`?impl=js` 逃生舱，`?impl=both` 每 cell diff。self-check 每次 worker 启动跑 29 项跨语言校验 bit-parity。rooftop 的 45× 里，Rust 本身贡献 ~6×，另 ~8× 来自把 `BuildingIndex` 用在 JS 显式跳过的路径上——JS 注释说"6.5K outer × any inner is cheap"，那个判断是错的。
-- **P2 拆掉 Explore/Inspect 双图**：v0.2 本来就要删对比滑条，现在还在付双倍 GPU/瓦片。动 `MapView.jsx` 最深，单独做。（还没做。）
+- **P2 拆掉 Explore/Inspect 双图 —— 运行时已关，代码保留**：commit `09dd221f`（2026-08-31）加了 `ENABLE_INSPECT_COMPARE = false` 常量，把所有真花时间的路径都 gate 上——第二个 maplibre-gl 实例的创建、每 `move` 的相机同步、inspect 侧的 sources/visibility effect、分隔条 drag 的全局 mousemove listener、~110 行分隔条 JSX。DOM 里从"两个 canvas 两个 maplibre-map element"变回"一个"，验证在该 commit message 里。**不再付双倍 GPU/瓦片。** 代码本身留在树里（`useState`/`useRef` 声明、`pickTargetMap` 的早退分支等，零运行时开销）——是 commit 作者明确的决定，Inspect view 对将来审计 Overture 数据完整性还有用，flag 一翻就恢复。真要"物理删除死代码"是个纯清洁性 refactor，不是 P2 原本的性能诉求。
 
 ---
 
