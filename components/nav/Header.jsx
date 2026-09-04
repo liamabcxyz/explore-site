@@ -1,20 +1,17 @@
 import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import Box from "@mui/material/Box";
-import OvertureWordmark from "@/components/nav/OvertureWordmark";
+import Wordmark from "@/components/nav/Wordmark";
 import DarkModeToggle from "@/components/nav/DarkModeToggle";
 import ShareButton from "@/components/nav/ShareButton";
 import SearchBox from "@/components/nav/SearchBox";
 import PropTypes from "prop-types";
 
-// The Overture Explorer version of this bar also carried GitHub / docs /
-// bug-report links (all pointing at Overture Maps' repo, not this project),
-// a language switcher, and a globe/flat toggle. None of them serve a
-// VANTAGE user — the analysis is fireworks visibility, not raw-data
-// inspection — so they're gone. What's left is what the app actually
-// needs: the wordmark, a share-current-view button (already picks up
-// launch state via lib/launchUrlState.js), theme, and a place search
-// for jumping to a city.
+// The header bar carries what a VANTAGE user actually needs: the
+// wordmark, a share-current-view button (picks up launch state via
+// lib/launchUrlState.js), the light/dark toggle, and a place search
+// for jumping to a city. Deliberately minimal — every extra button
+// is one more thing distracting from the analysis on screen.
 export default function Header({ mode, setMode, visibleTypes, activeFeature, onGersSelect }) {
   const isDark = mode === "theme-dark";
 
@@ -29,7 +26,7 @@ export default function Header({ mode, setMode, visibleTypes, activeFeature, onG
       }}
     >
       <Toolbar variant="dense" sx={{ minHeight: 60 }}>
-        <OvertureWordmark href="/" />
+        <Wordmark href="/" />
         <Box sx={{ flexGrow: 1 }} />
         <ShareButton visibleTypes={visibleTypes} activeFeature={activeFeature} />
         <DarkModeToggle mode={mode} setMode={setMode} />

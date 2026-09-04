@@ -48,32 +48,29 @@ export default function TermsOfUse() {
         <DialogTitle>Terms of Use</DialogTitle>
         <DialogContent dividers>
           <Typography paragraph variant="body2">
-            By using Overture Explorer (&quot;Explorer&quot;) you acknowledge and agree to (1) the{" "}
-            <Link
-              href="https://overturemaps.org/terms-of-use/"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Overture Maps Foundation Website Terms and Conditions of Use
-            </Link>
-            , and (2) these additional terms of use.
+            VANTAGE is a fireworks-visibility estimator. It computes whether the
+            geometric line of sight between a viewing spot and a launch point is
+            clear of the buildings and terrain it knows about.
           </Typography>
           <Typography paragraph variant="body2">
-            Explorer is a visualization and inspection tool to help you understand the structure, coverage, and characteristics of Overture
-            Maps data and schema. You are permitted to use Explorer solely for these uses.
-          </Typography>
-          <Typography paragraph variant="body2">
-            Explorer is not a product or a service. The tile endpoints powering Explorer are not
-            stable production infrastructure and as such you should not use them for any purpose
-            other than the purposes described in the prior paragraph. Explorer is not a mapping
-            service and is not intended for navigation, routing, or operational use of any kind.
+            The analysis does <strong>not</strong> account for trees, temporary
+            structures (scaffolding, construction cranes), weather, haze, or
+            ambient light, and it cannot verify the actual location, altitude,
+            or timing of any real fireworks display. Building height data has
+            gaps and errors; terrain data is a global model, not surveyed.
+            Treat every result as a guide, not a guarantee.
           </Typography>
           <Typography paragraph variant="body2" sx={{ fontWeight: 600 }}>
-            EXPLORER IS PROVIDED AS-IS AND WITHOUT WARRANTIES OF ANY KIND.
+            VANTAGE IS PROVIDED AS-IS AND WITHOUT WARRANTIES OF ANY KIND. Do
+            not use it for navigation, routing, or operational decisions.
           </Typography>
           <Typography paragraph variant="body2">
-            The datasets displayed in Explorer are subject to the licenses of third party data
-            providers. Please see Overture&apos;s{" "}
+            The base map data is provided by the{" "}
+            <Link href="https://overturemaps.org/" target="_blank" rel="noopener noreferrer">
+              Overture Maps Foundation
+            </Link>{" "}
+            under the licenses of its upstream sources (OpenStreetMap and
+            others). See Overture&apos;s{" "}
             <Link
               href="https://docs.overturemaps.org/attribution/"
               target="_blank"
@@ -81,7 +78,23 @@ export default function TermsOfUse() {
             >
               attribution and licensing guide
             </Link>{" "}
-            for details.
+            for details. Terrain elevation comes from{" "}
+            <Link
+              href="https://registry.opendata.aws/terrain-tiles/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              AWS Terrain Tiles
+            </Link>
+            . Address lookup on the &ldquo;here&rdquo; view is powered by{" "}
+            <Link
+              href="https://operations.osmfoundation.org/policies/nominatim/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              OpenStreetMap Nominatim
+            </Link>
+            .
           </Typography>
         </DialogContent>
         <DialogActions>

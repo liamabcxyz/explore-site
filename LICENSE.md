@@ -1,4 +1,10 @@
+MIT License
+
 Copyright (c) 2024 Overture Maps Foundation and affiliates
+  (original code inherited from https://github.com/OvertureMaps/explore-site)
+
+Copyright (c) 2026 VANTAGE contributors
+  (modifications and additions in this repository)
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the

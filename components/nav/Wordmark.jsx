@@ -1,13 +1,10 @@
 import Link from "next/link";
 import PropTypes from "prop-types";
 
-// File still named OvertureWordmark for backward-compat with the Header
-// import path — the actual brand it renders is VANTAGE, matching the
-// landing page (app/page.jsx) and the browser title (app/layout.jsx). Kept
-// as its own component so re-branding again later is a one-file change.
-// The OMF logo image the old Overture Explorer wordmark carried is gone
-// on purpose — this app isn't the OMF's data explorer any more.
-export default function OvertureWordmark({ href = "/" }) {
+// The VANTAGE brand strip in the header. Kept as its own component so
+// re-branding (a proper logo image, a wider header, a per-route
+// variant) is a one-file change.
+export default function Wordmark({ href = "/" }) {
   const isInternal = href.startsWith("/");
   const style = {
     display: "flex",
@@ -41,6 +38,6 @@ export default function OvertureWordmark({ href = "/" }) {
   );
 }
 
-OvertureWordmark.propTypes = {
+Wordmark.propTypes = {
   href: PropTypes.string,
 };

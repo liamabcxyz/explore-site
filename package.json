@@ -1,7 +1,9 @@
 {
-  "name": "explore-site",
-  "version": "1.0.0",
+  "name": "vantage",
+  "version": "0.1.0-beta",
   "private": true,
+  "description": "Line-of-sight visibility analysis for fireworks shows — where can you actually see the show from?",
+  "keywords": ["fireworks", "viewshed", "line-of-sight", "visibility", "maplibre", "overture", "webassembly"],
   "scripts": {
     "dev": "next dev --webpack",
     "postinstall": "node scripts/copy-maplibre-assets.mjs",
