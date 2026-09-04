@@ -332,7 +332,10 @@ function Center({ children }) {
  * to a real inbox.
  */
 function buildFeedbackMailto(analysis, verdict, locInfo) {
-  const email = process.env.NEXT_PUBLIC_FEEDBACK_EMAIL || "feedback@example.com";
+  // The `+feedback` Gmail suffix routes to the same inbox as
+  // vantagespots@gmail.com but stays filterable via a Gmail rule on
+  // the To: header. Env var can override for staging / test inboxes.
+  const email = process.env.NEXT_PUBLIC_FEEDBACK_EMAIL || "vantagespots+feedback@gmail.com";
   const sha = (process.env.NEXT_PUBLIC_GIT_SHA || "dev").slice(0, 8);
   const url = typeof window !== "undefined" ? window.location.href : "";
   const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";

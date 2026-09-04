@@ -21,7 +21,10 @@ export default function BetaBadge() {
 
   const sha = (process.env.NEXT_PUBLIC_GIT_SHA || "dev").slice(0, 8);
   const builtAt = process.env.NEXT_PUBLIC_BUILD_TIME;
-  const feedbackEmail = process.env.NEXT_PUBLIC_FEEDBACK_EMAIL || "";
+  // Same "+feedback" Gmail alias fallback as MobileHere — routes to
+  // vantagespots@gmail.com but filterable, and works even before the
+  // deployer sets NEXT_PUBLIC_FEEDBACK_EMAIL explicitly.
+  const feedbackEmail = process.env.NEXT_PUBLIC_FEEDBACK_EMAIL || "vantagespots+feedback@gmail.com";
 
   const feedbackHref = feedbackEmail
     ? `mailto:${feedbackEmail}?subject=${encodeURIComponent(`VANTAGE beta feedback (v${sha})`)}` +
