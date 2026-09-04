@@ -1,0 +1,6 @@
+# Beta deployment — do not index while the app is still under active
+# testing. When we're ready for search discovery, replace this file with
+# an "Allow" or delete it entirely; the noindex meta tag in app/layout.jsx
+# also needs to be flipped via NEXT_PUBLIC_ALLOW_INDEX=true.
+User-agent: *
+Disallow: /

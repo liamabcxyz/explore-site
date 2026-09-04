@@ -1,6 +1,13 @@
 import './globals.css';
+import AppShell from '@/components/shared/AppShell';
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
+// `noindex` while the site is in beta so Google doesn't cache a
+// half-broken version. Flip with `NEXT_PUBLIC_ALLOW_INDEX=true` at
+// build time when we're ready for search discovery, and delete
+// public/robots.txt at the same time.
+const allowIndex = process.env.NEXT_PUBLIC_ALLOW_INDEX === 'true';
 
 export const metadata = {
   title: 'VANTAGE',
@@ -8,6 +15,7 @@ export const metadata = {
   icons: {
     icon: `${basePath}/favicon.png`,
   },
+  robots: allowIndex ? undefined : { index: false, follow: false },
 };
 
 const notoSans = `${basePath}/fonts/Noto Sans.woff2`;
@@ -50,7 +58,9 @@ export default function RootLayout({ children }) {
           href="https://fonts.googleapis.com/css2?family=TikTok+Sans:opsz,wght@12..36,300..900&display=swap"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <AppShell>{children}</AppShell>
+      </body>
     </html>
   );
 }

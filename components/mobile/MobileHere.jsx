@@ -287,6 +287,15 @@ export default function MobileHere() {
         >
           Show details on full map
         </Button>
+        <Button
+          fullWidth
+          size="small"
+          variant="text"
+          sx={{ color: "text.secondary", fontSize: 12 }}
+          href={buildFeedbackMailto(analysis, v, locInfo)}
+        >
+          Something wrong? Send feedback
+        </Button>
       </Stack>
     </Box>
   );
@@ -311,6 +320,45 @@ function Center({ children }) {
       {children}
     </Box>
   );
+}
+
+/**
+ * Build a `mailto:` link with the analysis context pre-populated so a
+ * beta tester's feedback arrives with everything the maintainer needs
+ * to reproduce (version, verdict, coords, device UA, error if any).
+ *
+ * Falls back to a plain empty body when the feedback email isn't
+ * configured — the link is still safe to render, just won't route
+ * to a real inbox.
+ */
+function buildFeedbackMailto(analysis, verdict, locInfo) {
+  const email = process.env.NEXT_PUBLIC_FEEDBACK_EMAIL || "feedback@example.com";
+  const sha = (process.env.NEXT_PUBLIC_GIT_SHA || "dev").slice(0, 8);
+  const url = typeof window !== "undefined" ? window.location.href : "";
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const parts = [
+    "What went wrong (please describe):",
+    "",
+    "",
+    "-- auto-attached context, ok to keep --",
+    `version: ${sha}`,
+    `page: ${url}`,
+    `verdict: ${verdict?.label || "n/a"}`,
+    analysis?.profile
+      ? `frac: ${analysis.profile.frac.toFixed(3)}  category: ${analysis.profile.category}`
+      : "(no analysis yet)",
+    analysis?.observer
+      ? `observer: ${analysis.observer.lat.toFixed(5)}, ${analysis.observer.lng.toFixed(5)}`
+      : "",
+    analysis?.launch
+      ? `launch: ${analysis.launch.lat.toFixed(5)}, ${analysis.launch.lng.toFixed(5)}`
+      : "",
+    analysis?.show ? `show: ${analysis.show.name}` : "",
+    locInfo?.primary ? `where: ${locInfo.primary}` : "",
+    `ua: ${ua}`,
+  ].filter(Boolean).join("\n");
+  const subject = `VANTAGE beta feedback (v${sha})`;
+  return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(parts)}`;
 }
 
 function buildDetailsUrl(analysis) {
