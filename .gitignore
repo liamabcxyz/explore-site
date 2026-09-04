@@ -6,3 +6,16 @@ public/mapbox-gl-rtl-text.js
 public/maplibre-gl-worker.mjs
 public/maplibre-gl-shared.mjs
 .DS_Store
+
+# Local env files — real secrets (Sentry DSN, webhook URLs, Discord)
+# belong in the Cloudflare Pages env var dashboard, not committed.
+.env
+.env.*
+!.env.example
+
+# Cloudflare Wrangler CLI state (if you ever use wrangler for the
+# /functions/api/log-error function locally).
+.wrangler/
+
+# Log files sometimes dropped in the repo root during dev.
+*.log
